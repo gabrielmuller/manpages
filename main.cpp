@@ -15,9 +15,7 @@ struct str_range {
     length = other.length;
   }
 };
-//  árvore que mapeia nome do arquivo a dois inteiros
-//  int[0]: posição do conteúdo do arquivo no texto
-//  int[1]: tamanho do conteúdo
+//  árvore que mapeia nome do arquivo a struct de dois inteiros
 //variável global porque ainda não tá serializado
 map<string, str_range>  primary_tree;
 
