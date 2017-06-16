@@ -1,12 +1,13 @@
 ARGS=
-
+PARAMS=-std=c++14
+INPUT=pages_little
 compilerun:
 	make -s compile
 	make -s run
 compile:
-	g++ main.cpp -o main.o -std=c++14
+	g++ *.cpp *.h -o main.o $(PARAMS)
 run:
-	./main.o $(ARGS)
+	./main.o $(ARGS) $(INPUT)/*.txt
 debug:
-	g++ -g main.cpp -o main.o -std=c++14
+	g++ -g *.cpp *.h -o main.o $(PARAMS)
 	gdb main.o
