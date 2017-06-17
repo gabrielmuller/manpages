@@ -3,7 +3,13 @@
 
 #include "helper.h"
 #include <fstream>
+#include <vector>
+
+typedef std::vector<std::string> str_vec;
 namespace helper {
+
+//lista de conectivos
+str_vec stop_words;
 
 //  Conteúdo do arquivo como string.
 std::string get_file_contents(std::string filename)
@@ -42,6 +48,27 @@ std::string get_file_name(std::string filename) {
 long unsigned int get_file_size(std::string filename) {
   std::ifstream file (filename, std::ios::ate | std::ios::binary);
   return file.tellg();
+}
+
+//  carrega lista de conectivos a partir de arquivo
+void load_stop_words(std::string filename) {
+  std::ifstream file (filename);
+  std::string line;
+  while (std::getline(file, line)) {
+    stop_words.push_back(line);
+  }
+}
+
+//  true se palavra for conectivo
+bool is_stop_word(std::string word) {
+  for (str_vec::iterator it = stop_words.begin();
+   it != stop_words.end();
+    it++) {
+      if (word == *it) {
+        return true;
+      }
+    }
+  return false;
 }
 
 } //  namespace helper

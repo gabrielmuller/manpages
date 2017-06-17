@@ -25,41 +25,40 @@ void write_primary (int num_files, char** filenames, std::string output) {
   long unsigned int total_size = 0;
 
   //  calcula tamanho total de todos arquivos
-  for (auto i = 1; i < num_files; i++) {
+  /*for (auto i = 1; i < num_files; i++) {
     total_size += get_file_size(filenames[i]);
   }
 
   //  texto de todos arquivos vai aqui
-  char all_content[total_size];
+  char all_content[total_size];*/
 
   //  posição desse arquivo all_content
   long unsigned int index = 0;
+
+  //  cria registro primário
+  ofstream data (output, ios::app);
 
   for (auto i = 1; i < num_files; i++) {
 
     //  nome do arquivo sem extensão etc
     string filename = get_file_name(filenames[i]);
+    string content = get_file_contents(filenames[i]);
 
     cout << "Inserindo entrada " << filename << " na árvore." << endl;
-    auto size = get_file_size(filenames[i]);
     str_range r;
+    auto length = content.length();
     r.start = index;
-    r.length = size;
+    r.length = length;
     primary_tree.insert(pair<string, str_range>(filename, r));
 
     //  atualiza index para próximo arquivo
-    index += get_file_size(filenames[i]);
+    index += length;
 
-    //  concatena conteúdo desse arquvio
-    strcat(all_content, get_file_contents(filenames[i]).c_str());
+    //  salva conteúdo desse arquivo
+    data << content;
   }
-
-  //  cria registro primário
-  ofstream data (output);
-
   //TO-DO: serializar árvore
   //por enquanto só tem o texto.
-  data << all_content;
   data.close();
   cout << "Arquivo " << output << " escrito." << endl;
 }
@@ -80,10 +79,13 @@ std::string read_primary (std::string filename, std::string input) {
   char content[r.length];
   data.read(content, r.length);
 
-  cout << filename << " em " << input << ":" << endl << content << endl;
+  cout << "Lendo " << filename << " em " << input << ":\n" << content << endl;
 }
 
 int main (int argc, char** argv) {
+  load_stop_words("stop_words.txt");
+  cout << "hello é conectivo? " << is_stop_word("hello") << endl
+  << "you é conectivo? " << is_stop_word("you") << endl;
   write_primary(argc, argv, "manpages.dat");
   read_primary("asa.1", "manpages.dat");
 
