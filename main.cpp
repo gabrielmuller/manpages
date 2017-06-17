@@ -36,7 +36,7 @@ void write_primary (int num_files, char** filenames, std::string output) {
   long unsigned int index = 0;
 
   //  cria registro primário
-  ofstream data (output, ios::app);
+  ofstream data (output, ios::trunc);
 
   for (auto i = 1; i < num_files; i++) {
 
@@ -44,9 +44,11 @@ void write_primary (int num_files, char** filenames, std::string output) {
     string filename = get_file_name(filenames[i]);
     string content = get_file_contents(filenames[i]);
 
-    cout << "Inserindo entrada " << filename << " na árvore." << endl;
     str_range r;
     auto length = content.length();
+    cout << "Inserindo entrada " << filename << " na árvore " <<
+     " posição " << index << " tamanho "
+      << length << "...\n" << flush;
     r.start = index;
     r.length = length;
     primary_tree.insert(pair<string, str_range>(filename, r));
