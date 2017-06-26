@@ -2,7 +2,7 @@
 #include <map>
 #include <cstring>
 #include "helper.h"
-
+#include "avl_tree.h"
 using namespace std;
 using namespace helper;
 
@@ -17,8 +17,8 @@ struct str_range {
 };
 //  árvore que mapeia nome do arquivo a struct de dois inteiros
 //variável global porque ainda não tá serializado
-map<string, str_range>  primary_tree;
-
+typedef structures::AVLTree<string, str_range> ptree;
+ptree primary_tree;
 //  cria registro primário
 //  num_files é o número de arquivos + 1 por causa do argc
 void write_primary (int num_files, char** filenames, std::string output) {
@@ -51,7 +51,7 @@ void write_primary (int num_files, char** filenames, std::string output) {
       << length << "...\n" << flush;
     r.start = index;
     r.length = length;
-    primary_tree.insert(pair<string, str_range>(filename, r));
+    primary_tree.insert(filename, r);
 
     //  atualiza index para próximo arquivo
     index += length;
@@ -68,12 +68,7 @@ void write_primary (int num_files, char** filenames, std::string output) {
 std::string read_primary (std::string filename, std::string input) {
 
   //  acha posição do arquivo em all_content
-  map<string, str_range>::iterator it = primary_tree.find(filename);
-  if (it == primary_tree.end()) {
-    throw std::runtime_error(
-      "Arquivo não pôde ser lido.");
-  }
-  str_range r = it->second;
+  str_range r = primary_tree.find(filename);
 
   //lê a parte relevante
   ifstream data (input);
