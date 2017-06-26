@@ -7,47 +7,52 @@
 
 #include <stdexcept>
 #include <cstdlib>
-#include "array_list.h"
-
+#include <iostream>
+#include <fstream>
+#include <cstring>
 namespace structures {
-
 /** Classe árvore AVL.
  *
  */
+
 template <typename T, typename S>
 class AVLTree {
+private:
+ struct Node;
+ std::size_t size_{0}; /**< Tamanho da árvore. */
+
  public:
+   //terrível
+   struct tree_info {
+     std::string filename;  /**< FileIO */
+     T t_null; /**valor null de T*/
+     S s_null;
+     size_t* total_size;
+   };
+   tree_info info;
 
-   AVLTree(std::string filename, T t_null_, S s_null_) {
-     stream (filename, ios::trunc);
-     t_null = t_null_;
-     s_null = s_null_;
+   AVLTree(std::string filename_, T t_null_, S s_null_) {
+     info.filename = filename_;
+     info.t_null = t_null_;
+     info.s_null = s_null_;
+     info.total_size = &size_;
+     root(new Node(info));
    }
-  /** Destrutor.
-   *
-
-  ~AVLTree() {
-    if (root != nullptr) {
-      root->delete_all();
-      root = nullptr;
-    }
-    size_ = 0;
-  }
 
   /** Insere dado.
    *  \param data dado a inserir.
    */
   Node* root() {
-    return new Node(0);
+    return new Node(0, info);
   }
 
   void root(Node* node) {
-    node->writeMe(0);
+    node->writeMe(0, info);
   }
 
   void insert(const T& data, const S& second) {
     if (empty()) {
-      root(new Node(data, second));
+      root(new Node(data, second, info));
     } else {
       root()->insert(data, second);
     }
@@ -73,13 +78,13 @@ class AVLTree {
     }
 
     //não achou
-    return s_null;
+    return info.s_null;
   }
 
   /** Árvore vazia?
    *  \return true se vazia.
    */
-  bool empty() const { return root == nullptr; }
+  bool empty() { return root()->isNull(); }
 
  private:
   /** Struct Node.
@@ -88,67 +93,88 @@ class AVLTree {
    */
   struct Node {
     int index;
-
+    tree_info info;
     T data;             /**< Dado. */
     S second;           /** Dado mapeado */
 
-    Node(const data_&, const second_&) {
+    Node(tree_info info_) {
+      reset(info_);
+    }
+    Node(const T data_, const S second_, tree_info info_) {
       data = data_;
       second = second_;
+      info = info_;
     }
-
+    void reset(tree_info info_) {
+      info = info_;
+      data = info.t_null;
+      second = info.s_null;
+      index = 0;
+    }
     bool isNull() {
-      return data == t_null;
+      return data == info.t_null;
     }
 
-    Node(int index) {
-      if (index < 0) {
-        throw new std::out_of_range("Index negativo");
+    Node(int index, tree_info info_) {
+      info = info_;
+      /*if (index < 0) {
+        std::cout << index << " eita nois \n" << std::flush;
+        throw std::out_of_range("Index negativo");
+      }*/
+      if (index < 0 || index >= *(info.total_size)) {
+        reset(info);
+      } else {
+        std::ifstream i(info.filename);
+        int tsize = sizeof(T);
+        int ssize = sizeof(S);
+        int start = index*(tsize+ssize);
+        i.seekg(start);
+        std::cout << index << " " << i.good() << std::endl << std::flush;
+
+        i.read((char*) &data, tsize);
+        i.seekg(start + tsize);
+        i.read((char*) &second, ssize);
       }
-      ifstream i(filename);
-      int tsize = sizeof(T);
-      int ssize = sizeof(S);
-      int start = index*(tsize+ssize);
-      i.seekg(start);
-      i.read(&data, tsize);
-      i.seekg(start+tsize);
-      i.read(&second, ssize);
     }
 
-    void writeMe(int index) {
-      ofstream o(filename);
+    void writeMe(int index, tree_info info_) {
+      info = info_;
+      std::ofstream o(info.filename);
       int tsize = sizeof(T);
       int ssize = sizeof(S);
       int start = index*(tsize+ssize);
-      i.seekg(start);
-      i.write(&data, tsize);
-      i.seekg(start+tsize);
-      i.write(&second, ssize);
-
+      o.seekp(start);
+      o.write((char*) &data, tsize);
+      o.seekp(start + tsize);
+      o.write((char*) &second, ssize);
     }
 
     Node* left() {
-      return new Node(index*2);
+      return new Node(index*2, info);
     }
 
     Node* right() {
-      return new Node(index*2 +1);
+      return new Node(index*2 +1, info);
     }
 
     Node* parent() {
-      return new Node(index/2);
+      if (index == 0) {
+        return new Node(info);
+      } else {
+        return new Node(index/2, info);
+      }
     }
 
     void left(Node* node) {
-      node->writeMe(index*2);
+      node->writeMe(index*2, info);
     }
 
     void right(Node* node) {
-      node->writeMe(index*2 +1);
+      node->writeMe(index*2 +1, info);
     }
 
     void parent(Node* node) {
-      node->writeMe(index / 2);
+      node->writeMe(index / 2, info);
     }
 
     std::size_t height; /**< Altura do nodo. */
@@ -157,19 +183,20 @@ class AVLTree {
      *  \param data dado a inserir.
      */
     void insert(const T& data_, const S& second_) {
+      Node* r = right();
+      Node* l = left();
+
       if (data_ > data) {
-        Node* r = right();
-        Node* l = left();
-        if (r.isNull()) {
-          right(new Node(data_, second_));
+        if (r->isNull()) {
+          right(new Node(data_, second_, info));
           //right()->parent(this);
           right()->rebalance();
         } else {
           r->insert(data_, second_);
         }
       } else {
-        if (left.isNull()) {
-          left(new Node(data_, second_));
+        if (left()->isNull()) {
+          left(new Node(data_, second_, info));
           //left->parent = this;
           left()->rebalance();
         } else {
@@ -179,12 +206,12 @@ class AVLTree {
     }
 
     void rebalance() {
-      Node* r = parent;
-      while (!(r->parent().isNull())) {
+      Node* r = parent();
+      while (!(r->parent()->isNull())) {
         r = r->parent();
       }
       r->updateHeight();
-      for (Node* i = parent(); !i.isNull(); i = i->parent()) {
+      for (Node* i = parent(); !i->isNull(); i = i->parent()) {
         if (i->factor() == 2) {
           if (i->right()->factor() == 1) {
             simpleLeft();
@@ -203,8 +230,8 @@ class AVLTree {
 
     int factor() {
       int l, r;
-      l = !(left().isNull()) ? left()->height : -1;
-      r = !(right().isNull()) ? right()->height : -1;
+      l = !(left()->isNull()) ? left()->height : -1;
+      r = !(right()->isNull()) ? right()->height : -1;
       return r - l;
     }
 
@@ -213,11 +240,11 @@ class AVLTree {
       Node* l = left();
       Node* r = right();
 
-      if (!l.isNull()) {
+      if (!l->isNull()) {
         l->updateHeight();
         height += l->height;
       }
-      if (!r.isNull()) {
+      if (!r->isNull()) {
         r->updateHeight();
         height += r->height;
       }
@@ -244,8 +271,7 @@ class AVLTree {
       Node* RL = R->left();
       Node* RLR = RL->right();
       R->left(RLR);
-      RL->right = R;
-      R->parent(RL);
+      RL->right(R);
       Node* RLL = RL->left();
       right(RLL);
       RL->left(this);
@@ -264,13 +290,8 @@ class AVLTree {
       parent(LR);
     }
 
-  Node* root{nullptr};  /**< Raiz da árvore. */
-  std::size_t size_{0}; /**< Tamanho da árvore. */
-  std::string filename  /**< FileIO */
-  T t_null;
-  S s_null;
+  };
 };
-
 }  // namespace structures
 
 #endif
