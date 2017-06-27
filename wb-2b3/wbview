@@ -1,0 +1,115 @@
+#! /usr/local/bin/scm \
+- !#
+;;; wbview: Program for viewing (low-level) WB database associations.
+;; Copyright (C) 1991, 1992, 1993, 2000, 2003, 2010 Free Software Foundation, Inc.
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU Lesser General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; Lesser General Public License for more details.
+;;
+;; You should have received a copy of the GNU Lesser General Public
+;; License along with this program.  If not, see
+;; <http://www.gnu.org/licenses/>.
+
+(require 'byte)
+(require 'byte-number)
+
+;;(slib:load-source (in-vicinity (program-vicinity) "all"))
+(require 'wb)
+(init-wb 400 800 2048)
+
+(define (wbview.usage)
+  (display "\
+\
+Usage: wbview FILE
+Usage: wbview FILE BLOCK-ID
+\
+  Displays associations in WB database FILE.
+"
+	   (current-error-port))
+  #f)
+
+(define (wbview.script args)
+  (cond ((not (<= 1 (length args) 2))
+	 (wbview.usage))
+	((eqv? #\- (string-ref (car args) 0))
+	 (wbview.usage))
+	((= 1 (length args))
+	 (wbview (car args) 0))
+	((not (string->number (cadr args)))
+	 (wbview.usage))
+	(else
+	 (wbview (car args) (string->number (cadr args))))))
+
+(define (do-more)
+  (define helped #f)
+  (display "--more--")
+  (force-output)
+  (let loop ((r (read-char)))
+    (cond ((eof-object? r) #f)
+	  ((char=? #\space r) #t)
+	  ;;((char=? #\newline r) #t)
+	  ((char-whitespace? r) (loop (read-char)))
+	  ((char-ci=? #\q r) #f)
+	  ;;(helped (loop (read-char)))
+	  (else (display " q to quit, space for more: ")
+		(force-output)
+		(set! helped #t)
+		(loop (read-char))))))
+
+(define (dspl-char chr)
+  (define cod (char->integer chr))
+  (cond ((<= 0 cod 31)
+	 (display "^")
+	 (display (integer->char (+ 64 cod))))
+	((char<=? chr #\~)
+	 (display chr))
+	(else
+	 (display "'")
+	 (display (number->string cod))
+	 (display "'"))))
+
+(define (wbview filename blknum)
+  (define seg (open-seg filename #f))
+  (cond ((not seg)
+	 (display ">>>>ERROR<<<< Could not open " (current-error-port))
+	 (write filename (current-error-port))
+	 (newline (current-error-port))
+	 #f)
+	(else
+	 (let ((han (open-bt seg blknum 0)))
+	   (cond ((or (not han) (wb:err? han))
+		  (close-seg seg #t)
+		  #f)
+		 (else
+		  (let ((curblk blknum))
+		    (define (continue?)
+		      (define newblk (HAN:ID han))
+		      (cond ((= curblk newblk) #t)
+			    (else (display "BLOCK ")
+				  (display newblk)
+				  (display "  ")
+				  (set! curblk newblk)
+				  (do-more))))
+		    (cond ((bt:get han "")
+			   =>
+			   (lambda (val)
+			     (display " --> ")
+			     (for-each dspl-char (string->list val))
+			     (newline))))
+		    (do ((key (bt:next han (bytes 0)) (bt:next han key)))
+			((or (not key) (not (continue?)))
+			 (close-seg seg #t)
+			 #t)
+		      (for-each dspl-char (string->list key))
+		      (display " --> ")
+		      (for-each dspl-char (string->list (bt:get han key)))
+		      (newline)))))))))
+
+(if *script* (exit (wbview.script (list-tail *argv* *optind*))))

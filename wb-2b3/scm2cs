@@ -1,0 +1,2678 @@
+#! /usr/local/bin/scm \
+- !#
+;;; scm2cs.scm: Program for translating SCM code to C# code
+;;; Copyright (C) 2006, 2007 Aubrey Jaffer and Ravi kiran Gorrepati
+;;; Copyright (C) 2008, 2009 Aubrey Jaffer
+;
+;Permission to copy this software, to modify it, to redistribute it,
+;to distribute modified versions, and to use it for any purpose is
+;granted, subject to the following restrictions and understandings.
+;
+;1.  Any copy made of this software must include this copyright notice
+;in full.
+;
+;2.  I have made no warranty or representation that the operation of
+;this software will be error-free, and I am under no obligation to
+;provide any services, by way of maintenance, update, or otherwise.
+;
+;3.  In conjunction with products arising from the use of this
+;material, there shall be no use of my name in any advertising,
+;promotional, or sales literature without prior written consent in
+;each case.
+
+;;;	   http://people.csail.mit.edu/jaffer/Schlep/scm2cs
+
+;; To generate documentation:
+;; schmooz scm2cs.scm; makeinfo scm2cs.txi; cp scm2cs.info /usr/local/info/; install-info scm2cs.info /usr/local/info/dir
+
+;;@ \input texinfo @c -*-texinfo-*-
+;;@setfilename scm2cs.info
+;;@settitle Scm2cs
+;;@setchapternewpage on
+;;@paragraphindent 0
+;;@defcodeindex ft
+;;@syncodeindex ft tp
+;;
+;;@dircategory The Algorithmic Language Scheme
+;;@direntry
+;;* Scm2cs: (scm2cs).     Translate SCM to C#
+;;@end direntry
+;;
+;;@node Top, Overview, (dir), (dir)
+;;
+;;@menu
+;;* Installation::
+;;* Usage::
+;;* Source Language::
+;;* Declarations::
+;;* Target Language::
+;;* Schlep API::
+;;@end menu
+;;
+;;@node Installation, Usage, Top, Top
+;;@chapter Installation
+;;
+;;@itemize @bullet
+;;@item
+;;Obtain @uref{../SCM, SCM} Scheme Implementation.
+;;@item
+;;Obtain @uref{../SLIB, SLIB} Scheme Library.
+;;@item
+;;Obtain @uref{schleprt.scm, schleprt.scm} (stubs for running Schlepable
+;;code in SCM).
+;;@item
+;;Obtain @uref{SchlepRT.cs} and include it (or a file with its
+;;contents) in the arguments to scm2cs (Runtime support).
+;;@item
+;;Obtain @uref{scm2cs.scm, scm2cs.scm} and install in a PATH directory
+;;as "scm2cs".
+;;@end itemize
+;;
+;;@node Usage, Source Language, Installation, Top
+;;@chapter Usage
+;;
+;;@example
+;;@include scm2cs.usage
+;;@end example
+;;
+;;@node Source Language, Declarations, Usage, Top
+;;@chapter Source Language
+;;
+;;@dfn{Scm2cs} is a Scheme to C# translator for a subset of Scheme.
+;;Using Scheme files as source, scm2cs produces texinfo documentation
+;;and formatted C# code preserving comments; and type, function, and
+;;variable names as much as possible.  The output from scm2cs is
+;;human-readable and can form the base for further development in C#;
+;;abandoning the original Scheme source.
+;;
+;;@section Scope of the Scheme Subset
+;;
+;;The Scheme subset supported by scm2cs is listed at@*
+;;@url{http://people.csail.mit.edu/jaffer/Schlep/#Schlep Subset}.
+;;
+;;Scheme integers and real numbers, booleans, chars, and strings are
+;;translated to the equivalent C# types.  SLIB byte vectors map to the
+;;type @code{byte[]} in C# code.  Vectors of user defined (C#) types
+;;are supported.
+;;
+;;The user incorporates custom C# data types by coding their
+;;definitions and accessors in a C# source file.  For the purposes
+;;of running in Scheme, put analogous definitions in a file which is
+;;not translated by scm2cs.
+;;
+;;Characters in variable names are translated as follows:
+;;
+;;@multitable @columnfractions .2 .1 .3
+;;@item @samp{%}  @tab @result{} @tab @samp{_Percent}
+;;@item @samp{@@} @tab @result{} @tab @samp{_At}
+;;@item @samp{->}  @tab @result{} @tab @samp{To}
+;;@item @samp{=}  @tab @result{} @tab @samp{Equal}
+;;@item @samp{>}  @tab @result{} @tab @samp{More}
+;;@item @samp{<}  @tab @result{} @tab @samp{Less}
+;;@item @samp{?}  @tab @result{} @tab @samp{_P}
+;;@item @samp{:}  @tab @result{} @tab @samp{_}
+;;@item @samp{-}  @tab @result{} @tab @samp{}
+;;@end multitable
+;;
+;;Scm2cs does not include support for a Scheme runtime.  Generated C#
+;;programs should not assume general Scheme values unless linked with
+;;a library providing these features.
+;;
+;;Scheme identifier names are used to determine the C# types of
+;;the corresponding variables and methods.
+
+;;; SLIB modules.
+(require 'common-list-functions)	;some
+(require 'string-search)
+(require 'line-i/o)			;READ-LINE
+(require 'byte)
+(require 'printf)
+(require 'filename)
+(require 'fluid-let)
+(require 'string-case)
+(require 'defmacroexpand)
+;;(require 'debug) (set! *qp-width* 100) (define qreport qpn)
+
+(define (schlep.usage)
+  (display "\
+\
+Usage: scm2cs [-i] file1.scm ... file2.cs ...
+Usage: scm2cs [-i] file1.scm ... file2.cs ... dir/
+\
+  Translates Scheme files FILE1.scm, ... and catenates C# files
+  DIR/FILE2.cs, ... to one C# file DIR/*CLASS-NAME*.cs, where
+  *CLASS-NAME* is declared in \"scm2cs.typ\" or a declare-names form
+  in a Scheme file, defaulting to \"\".  .SCM and .CS files can be
+  mixed in any order on the command line.
+
+Options:
+ -i             ignore classname generation.
+
+http://people.csail.mit.edu/jaffer/Schlep/scm2cs
+"
+	   (current-error-port))
+  #f)
+
+(define (schlep.script args)
+  (cond ((not (<= 1 (length args)))
+	 (schlep.usage))
+	;; Options:
+	;;  -p constant    File*.cs will contain constants.
+	#+UNIMPLEMENTED
+	((string=? "-p" (car args))
+	 (cond ((null? (cdr args)) (schlep.usage))
+	       ((string-ci=? "constant" (cadr args))
+		(prototype-style 'constant)
+		(schlep.script (cddr args)))
+	       (else (schlep.usage))))
+	((string=? "-i" (car args))
+	 (set! *ignore-classname-generation* #t)
+	 (schlep.script (cdr args)))
+	((and (<= 1 (string-length (car args)))
+	      (eqv? #\- (string-ref (car args) 0)))
+	 (schlep.usage)
+	 (string-ci=? "--help" (car args)))
+	(else
+	 (apply schlep args))))
+
+;;; REPORT an error or warning
+(define report
+  (lambda args
+    (display *schlep-input-name*)
+    (display ": In function `")
+    (display *procedure*)
+    (display "': ")
+    (newline)
+
+    (display *schlep-output-name*)
+    (display ": ")
+    (display *output-line*)
+    (display ": warning: ")
+    (apply qreport args)))
+
+(define qreport
+  (lambda args
+    (for-each (lambda (x) (write x) (display #\space)) args)
+    (newline)))
+
+;;; This allows us to test without generating files
+(define *schlep-input* (current-input-port))
+(define *schlep-output* (current-output-port))
+(define *schlep-input-name* "stdin")
+(define *schlep-output-name* "?")
+(define *documentation-output* (current-output-port))
+
+(define translator 'scm2cs)
+;; slib:features is fluid-let so Scheme session is not screwed up.
+(define schlep:features (cons 'schlep (cons translator slib:features)))
+(define *included-files* '())
+(define *label-list* '())		;Lexically active labels
+(define *procedure* #f)
+(define *output-line* 0)
+(define tokcntr 0)
+
+;scm2cs.typ supplies the values
+(define *namespace-id* "")
+(define *class-name* "")
+(define *schlep-output-dir* "")
+(define *use-list* '())
+;;(define *cs-output-file* #f)
+(define *ignore-classname-generation* #f)
+
+;; Don't indent on freshline -- continue on current line.
+(define CONTLINE -80)
+;; What is this for?
+(define EXTERN 'EXTERN)
+
+;; These are the possible values of @var{use} arguments to
+;; @code{schlep-exp}.
+(define VOID 'VOID)
+(define VAL 'VAL)
+(define LONG 'LONG)
+(define BOOL 'BOOL)
+
+;; These are types and type-modifiers which Schlep treats specially.
+(define INT 'INT)
+(define LONG 'LONG)
+(define PTR 'PTR)
+(define ARRAY 'ARRAY)
+
+;; These are the possible values of @var{termin} arguments to
+;; @code{schlep-exp}.
+(define RETURN "return")
+(define NONE "")
+(define COMMA ",")
+(define SEMI ";")
+(define SUBSCRIPT "]")
+
+;;This gives a fair idea of indentation for class defs. and
+;;method defs.
+(define GINDENT 0)			; global indent
+
+;;@section Defmacro
+;;
+;;@noindent
+;;Defmacros transforming Scheme code to Scheme code may be defined in
+;;Scheme source files.  If there are defmacros used in more than one
+;;Scheme source file, they can be removed to a separate file, and that
+;;file imported by a call to @code{defmacro:load} in each file (before
+;;a defmacro is invoked).
+
+;;@body
+;;Imports @code{defmacro}s from @1.
+(define (defmacro:load filename)
+  (and (pair? filename)
+       (eq? (car filename) 'IN-VICINITY)
+       (pair? (cdr filename))
+       (pair? (cadr filename))
+       (eq? (caadr filename) 'PROGRAM-VICINITY)
+       (let* ((fname (caddr filename))
+	      (port (try-open-file fname OPEN_READ)))
+	 (if port
+	     (do ((sexp (schlep-read port) (schlep-read port)))
+		 ((eof-object? sexp))
+	       (if (pair? sexp)
+		   (case (car sexp)
+		     ((DEFMACRO)
+		      (apply do-defmacro (cdr sexp)))
+		     ((DEFMACRO:LOAD)
+		      (defmacro:load (cadr sexp))))))))))
+
+;;@body
+;;Is an alist associating defmacro names with their transformers.  It
+;;is @code{fluid-let} during each file translatation, so that scm2cs
+;;macro definitions do not take effect in the Scheme top level.
+(define *schlep-defmacros* '())
+
+;;@node Delcarations, Target Language, Source Language, Top
+;;@chapter Delcarations
+
+;;@body The C# types to which variables are translated are controlled
+;;by @0.  A declaration is a list @code{(glob type)}.  @var{glob} is a
+;;match string; @var{type} an expression.  @var{Glob}s are matched to
+;;variable names with trailing digits removed.  Declarations made
+;;later override those made earlier.
+;;
+;;Declarations can be made by a call to @code{declare-names}.  If
+;;no declarations have been made before @code{schlep} is called,
+;;@code{schlep} will read a list of declarations from a file named
+;;@file{scm2cs.typ} if it exists in the same directory as the Scheme
+;;file being translated.
+;;
+;;If the @var{type} is a symbol or string, variables which match
+;;the glob string will be declared as types of that name.  If the
+;;@var{type} is a list, then it will be interpreted as follows.
+;;
+;;@table @code
+;;@item (ptr @var{type})
+;;produces @code{* @var{type}}.
+;;@item (array @var{type})
+;;produces @code{@var{type}[]}.
+;;
+;;@end table
+;;
+;;Types can be nested.  Procedure names ending with @samp{!} are typed
+;;to return @code{void}.  Procedure names ending with @samp{?} are
+;;translated to names with a trailing @samp{_P}.
+(define declarations '())
+
+;;@noindent
+;;These procedures can be mixed with code to be translated.
+
+;;@body @1 must be a list of lists (declarations).  Glob
+;;declarations may have local scope.  Glob declarations at
+;;top level persist from one file to the next.
+(define (declare-names globs)
+  (for-each (lambda (glob)
+	      (or (and (pair? glob)
+		       (= 2 (length glob)))
+		  (report "bad syntax" glob))
+	      (declare-name! (car glob) (cadr glob)))
+	    globs))
+
+;;@noindent
+;;The Scheme files in the table at@*
+;;@url{http://people.csail.mit.edu/jaffer/CNS/benchmarks.html#PRNG}@*
+;;have examples of the use of @code{declare-names}.
+
+(define (declare-name! glob ctype)
+  (if (symbol? glob) (set! glob (symbol->string glob)))
+  (cond
+   ((equal? "*namespace-id*" glob)
+    (set! *namespace-id* ctype))
+   ((equal? "*class-name*" glob)
+    (set! *class-name* ctype))
+   ((equal? "*cs-output-file-name*" glob)
+    (set! *schlep-output* (open-file (string-append *schlep-output-dir* ctype) "w?")))
+   ((equal? "*cs-dir*" glob)
+    (set! *schlep-output-dir* ctype))
+   ((equal? "*use-list*" glob)
+    (set! *use-list* ctype))
+   (else
+    (let (	      ; CADDR is count per file, CADDDR is cumulative.
+	  (entry (list (filename:match?? glob) glob ctype 0 0)))
+      (let loop ((typs declarations))
+	(cond ((null? typs)
+	       (set! declarations
+		     (append declarations (list (list entry)))))
+	      (else
+	       (set-cdr! typs (cons (car typs) (cdr typs)))
+	       (set-car! typs (list entry)))))))))
+
+(define (read-local-declarations vic)
+  (let ((typfile
+	 (in-vicinity vic (string-append (symbol->string translator) ".typ"))))
+    (cond ((file-exists? typfile)
+	   (set! declarations '())
+	   (display "Reading type declarations from ")
+	   (display typfile)
+	   (newline)
+	   (declare-names (call-with-input-file typfile read))
+	   #t)
+	  (else #f))))
+
+(define (read-version revfile)
+  (and (file-exists? revfile)
+       (call-with-input-file
+	   revfile (lambda (port)
+		     (and (find-string-from-port? "VERSION" port)
+			  (read port))))))
+
+;;@node Target Language, Schlpe API, Delcarations, Top
+;;@chapter Target Language
+
+;;@body In Scheme source, @0 has no effect, but the @1 are written to
+;;@var{filename}.cs during translation.
+(define (pragma.cs . strings) #f)
+
+(define (strip-quote expr)
+  (if (and (pair? expr) (eq? 'quote (car expr)))
+      (cadr expr)
+      expr))
+
+;; @body Returns a string describing the current input-file and
+;; line-number, if that information is known.  @0 would only be useful
+;; as a read-macro in the file being translated:
+;;
+;; @example
+;; #.(where)
+;; @end example
+(define (where)
+  (string-append (or (port-filename *schlep-input*)
+		     *schlep-input-name*)
+		 ":"
+		 (cond ((port-line *schlep-input*) => number->string)
+		       (else "??"))
+		 ": "))
+
+;;These variables control file translation.  They have no effect from
+;;the file being translated, unless they are defined using
+;;read-macros: @code{#.(define number-lines? #t)}.
+
+;;@body
+;;Define @0 to #t for C# code to be prefixed with commmented line
+;;numbers.  The default value is #f.
+(defvar number-lines? #f)
+
+;;@node Schlep API, , Target Language, Top
+;;@chapter Schlep API
+;;
+;;@noindent
+;;The following procedures are called to translate a file.
+;;They should @emph{not} be called from the file being translated.
+
+;;@body Translates scheme files to C#.  Each argument must be a
+;;string.  If the @var{suffix} is:
+;;
+;;@table @samp
+;;@item scm
+;;Produces files @var{Filename}.cs and @var{Filename}.txi (Filename
+;;is capitalized).
+;;
+;;@end table
+;;
+;;If @var{filename}.txi is empty after translation, then it is deleted.
+(define (schlep . filenames)
+  (define dest (car (last-pair filenames)))
+  (define *.scm? (filename:match?? "*.scm"))
+  (define *.cs? (filename:match?? "*.cs"))
+  (cond (((filename:match?? "*[\\/]") dest)
+	 (set! filenames (butlast filenames 1)))
+	(else (set! dest "")))
+  (if (null? declarations)
+      (or (read-local-declarations (pathname->vicinity "scm2cs"))
+	  (report "Error: No scm2cs.typ file found, all variables will be int")))
+  ;;(set! *schlep-output* *cs-output-file*)
+  (cond ((not *ignore-classname-generation*)
+	 (write-used-system-classes *use-list*)
+	 (out 0)
+	 (emit-namespace-decl)
+	 (emit-class-declaration)
+	 (emit-func-invoker)))
+  (for-each (lambda (filename)
+	      (out 0)
+	      (cond ((*.scm? filename)
+		     (schlep1 (replace-suffix filename ".scm" "") dest))
+		    ((*.cs? filename)
+		     (copy-source-file filename))
+		    (else
+		     (schlep1 filename dest))))
+	    filenames)
+  ;;(set! *schlep-output* *cs-output-file*)
+  (cond (*emitted-namespace-decl*
+	 (out 2 "}") (out 0 "}"))
+	(*emitted-class-declaration* (out 0 "}")))
+  (out 0)
+  (close-output-port *schlep-output*)
+  (do-includes)
+  #t)
+
+;;Integrate the csfile into the translated cs file.
+(define (copy-source-file file)
+  (let ((ifile (open-file (string-append *schlep-output-dir* file) "r?")))
+    (do ((line (read-line ifile) (read-line ifile)))
+	((eof-object? line) #f)
+      (out GINDENT line))))
+
+(define (write-used-system-classes use-list)
+  (for-each (lambda(arg)
+	      (out 0 "using " arg ";")) use-list))
+
+(define (emit-func-invoker)
+  (out GINDENT
+       "public static int invokeFunc(String funcName, params Object[] args)
+    {
+      MethodInfo method = typeof(" *class-name* ").GetMethod(funcName);
+      return (int) method.Invoke(null, args);//first parameter is null for all static methods.
+    }
+"))
+
+;;@body Prints an association-list (suitable passing to
+;;@code{declare-name!}) along with the counts of references to each
+;;name pattern type declared.
+(define (declarations-report! cumulative? port)
+  (define cum-uses cadddr)
+  (define set-cum-uses! (lambda (arg n) (set-car! (cdddr arg) n)))
+  (define file-uses caddr)
+  (define set-file-uses! (lambda (arg n) (set-car! (cddr arg) n)))
+  (cond ((string? port)
+	 (call-with-output-file port
+	   (lambda (port)
+	     (declarations-report! cumulative? port))))
+	(cumulative?
+	 (fprintf port ";; %s.typ\n" translator)
+	 (display "(" port)
+	 (for-each (lambda (arg)
+		     (set! arg (cdr arg))
+		     (let ((uses (+ (cum-uses arg)
+				    (file-uses arg))))
+		       (cond ((positive? uses)
+			      (fprintf port "\n (%#-6a %#-20a)"
+				       (car arg) (cadr arg))
+			      (set-cum-uses! arg 0)
+			      (set-file-uses! arg 0)
+			      (fprintf port " ;; %d uses" uses)))))
+		   (reverse (apply append declarations)))
+	 (display "\n )\n" port))
+	(else
+	 (fprintf port "#+%s\n" translator)
+	 (display "(declare-names '(" port)
+	 (for-each (lambda (arg)
+		     (set! arg (cdr arg))
+		     (let ((uses (file-uses arg)))
+		       (cond ((positive? uses)
+			      (fprintf port "\n (%#-6a %#-20a)"
+				       (car arg) (cadr arg))
+			      (set-file-uses! arg 0)
+			      (set-cum-uses! arg (+ (cum-uses arg) uses))
+			      (fprintf port " ;; %d uses" uses)))))
+		   (reverse (apply append declarations)))
+	 (display "\n ))\n" port))))
+
+;;;;Internal procedures
+(define (careful-for-each proc lst)
+  (do ((lst lst (cdr lst)))
+      ((not (pair? lst))
+       (if (not (null? lst)) (proc lst)))
+    (proc (car lst))))
+
+;; Indents and displays its arguments.
+(define (out indent . args)
+  (cond ((>= indent 0)
+	 (newline *schlep-output*)
+	 (set! *output-line* (+ 1 *output-line*))
+	 (cond ((and number-lines? (> indent 0))
+		(display "/*" *schlep-output*)
+		(display *output-line* *schlep-output*)
+		(display "*/" *schlep-output*)))
+	 (out-indent indent)))
+  (careful-for-each
+   (lambda (a)
+     (cond ((symbol? a)
+	    (schlep-symbol a *schlep-output*))
+	   ((string? a)
+	    (display a *schlep-output*)
+	    (cond (#f (string-index a #\nl)
+		      (set! *output-line* (+ 1 *output-line*))
+		      (report "newline in string" a))))
+	   (else
+	    (if (and (number? a) (negative? a))
+		(display #\space *schlep-output*))
+	    (display a *schlep-output*))))
+   args))
+
+;;Capitalize the first letter of the string.
+(define (capitalize str)
+  (string-append (string-upcase (substring str 0 1))
+		 (substring str 1 (string-length str))))
+
+(define (schlep-name2 name)
+  (define str (string->list name))
+  (define ls '())
+  (define upcase? #f)
+  (for-each (lambda (c)
+	      (let ((tc (cond ((char=? c #\-) (set! upcase? #t) #f)
+			      (upcase? (set! upcase? #f) (char-upcase c))
+			      (else c))))
+		(if tc (set! ls (cons tc ls)))))
+	    str)
+  (list->string (reverse ls)))
+
+;; Removes, studly-fies, or translates characters from @1 and displays
+;; to @2
+(define (schlep-name name port)
+  (define str (string->list name))
+  (define visible? #f)
+  (define upcase? #f)
+  (define last-c #f)
+  (for-each (lambda (c)
+	      (let ((tc (cond ((char-alphabetic? c)
+			       (cond (upcase? (set! upcase? #f)
+					      (char-upcase c))
+				     (else c)))
+			      ((char-numeric? c) c)
+			      ((char=? c #\%) "_Percent")
+			      ((char=? c #\@) "_At")
+			      ((char=? c #\=) "Equal")
+			      ((char=? c #\:) (set! upcase? #t) "_")
+			      ((char=? c #\-) (set! upcase? #t) #f)
+			      ((char=? c #\>)
+			       (cond ((eqv? #\- last-c)
+				      (set! upcase? #t) "To")
+				     (else "More")))
+			      ((char=? c #\<) "Less")
+			      ((char=? c #\?) "_P")
+			      ((char=? c #\.) ".")
+			      ((char=? c #\_) "_")
+			      (else #f))))
+		(cond (tc (set! visible? #t) (display tc port)))
+		(set! last-c c)))
+	    str)
+  (if (not visible?) (report "C-invisible symbol?" name)))
+
+(define (schlep-symbol name port)
+  (case name
+    ((sin) (display "Math.Sin" port))
+    ((cos) (display "Math.Cos" port))
+    ((tan) (display "Math.Tan" port))
+    ((asin) (display "Math.Asin" port))
+    ((acos) (display "Math.Acos" port))
+    ((atan) (display "Math.Atan" port))
+    ((atan2) (display "Math.Atan2" port))
+    ((sinh) (display "Math.Sinh" port))
+    ((cosh) (display "Math.Cosh" port))
+    ((tanh) (display "Math.Tanh" port))
+    ((sqrt) (display "Math.Sqrt" port))
+    ((log) (display "Math.Log" port))
+    ((exp) (display "Math.Exp" port))
+    ((abs) (display "Math.Abs" port))
+    ((min) (display "Math.Min" port))
+    ((max) (display "Math.Max" port))
+    ((expt) (display "Math.Pow" port))
+    ((ceiling) (display "Math.Ceiling" port))
+    ((round) (display "Math.Round" port))
+    ((floor) (display "Math.Floor" port))
+    ((inexact->exact) (display "(int)" port))
+    (else
+     (schlep-name (symbol->string name) port))))
+
+;; Makes a temporary variable name.
+(define (tmpify sym)
+  (string->symbol (string-append "T_" (symbol->string sym))))
+
+;; Makes a continue name.
+(define (lblify sym)
+  (string->symbol (string-append "L" (symbol->string sym))))
+
+;; Makes a break name.
+(define (brkify sym)
+  (string->symbol (string-append "B" (symbol->string sym))))
+
+(define (caseify sym)
+  (string->symbol (string-append "C" (symbol->string sym))))
+
+(define (assoc-if str alst)
+  (cond ((null? alst) #f)
+	(((caar alst) str) (car alst))
+	(else (assoc-if str (cdr alst)))))
+
+;;; VARTYPE gives a guess for the type of var
+(define (vartype var)
+  (define (suffix->ctype str len)
+    (let loop ((typs declarations))
+      (and (pair? typs)
+	   (let* ((match (assoc-if (substring str 0 len) (car typs))))
+	     (cond (match
+		    (set! match (cdr match))
+		    (set-car! (cddr match) (+ 1 (caddr match)))
+		    match)
+		   (else
+		    (loop (cdr typs))))))))
+  (let* ((str (symbol->string var))
+	 (len (string-length str)))
+    (do ((i len (+ -1 i)))
+	((not (char-numeric? (string-ref str (+ -1 i)))) (set! len i)))
+    (cond ((eqv? 0 (substring? "T_" str))
+	   (do ((idx 2 (+ 1 idx)))
+	       ((or (>= idx len)
+		    (not (char-numeric? (string-ref str idx))))
+		(cond ((< idx len)
+		       (set! str (substring str idx len))
+		       (set! len (- len idx))))))))
+    (let ((v (suffix->ctype str len)))
+      (cond ((and (not v) (char=? #\? (string-ref str (+ -1 len)))) BOOL)
+	    ((not v) INT)
+	    ((and (memq (cadr v) '(ARRAY PTR)) (>= len 4))
+	     (let ((c (string-ref str (- len 4))))
+	       (list (cadr v)
+		     (vartype (string->symbol
+			       (substring str 0
+					  (if (memv c '(#\- #\: #\_))
+					      (- len 4)
+					      (- len 3))))))))
+	    ((and (eq? (cadr v) 'WORD)
+		  (>= len 5)
+		  (string-ci=? "dword" (substring str (+ -5 len) len)))
+	     'DWORD)
+	    ((cadr v) (cadr v))
+	    (else INT)))))
+
+;;; PROCTYPE - gives a guess for the type of proc
+(define (proctype proc)
+  (let ((str (symbol->string proc)))
+    (case (string-ref str (- (string-length str) 1))
+      ((#\?) BOOL)
+      ((#\!) VOID)
+      (else (or (vartype proc)
+		(begin (report "unknown type" proc)
+		       VAL))))))
+
+(define (bool-exp? sexp)
+  (cond ((boolean? sexp)			#t)
+	((symbol? sexp)
+	 (let ((str (symbol->string sexp)))
+	   (eqv? #\? (string-ref str (- (string-length str) 1)))))
+	((not (pair? sexp))			#f)
+	((memq (car sexp)
+	       '(< <= = >= > LOGTEST AND OR NOT IF))	#t)
+	((symbol? (car sexp))
+	 (let ((str (symbol->string (car sexp))))
+	   (eqv? #\? (string-ref str (- (string-length str) 1)))))
+	(else					#f)))
+
+(define (type->exptype type)
+  ;;(case type ((VOID BOOL LONG) type) (else VAL))
+  type)
+
+(define (out-typecheck type)
+  (case (car type)
+    ((ARRAY)
+     (out CONTLINE "(" (cadr type) "[]" ") "))
+    (else
+     (out CONTLINE type))))
+
+(define (outtype-aux doc? indent type name val)
+  (cond ((symbol? type)
+	 (let ((typestr
+		(case type
+		  ((BOOL) "bool")
+		  ((VAL) "SCM")
+		  (else type))))
+	   (if doc?
+	       (out indent "{" typestr "} " name)
+	       (out indent typestr #\space name))
+	   #t))
+	((string? type)
+	 (if doc?
+	     (out indent "{" type "} " name)
+	     (out indent type #\space name)))
+	((pair? type)
+	 (case (car type)
+	   ((PTR)
+	    (cond (doc?
+		   (out indent "{")
+		   (outtype-aux #f CONTLINE (cadr type) NONE VOID)
+		   (out CONTLINE "*} " name)
+		   #t)
+		  (else
+		   (outtype-aux #f indent (cadr type) NONE VOID)
+		   (out CONTLINE "*" name)
+		   #t)))
+	   ((ARRAY)
+	    (cond ((and (pair? val)
+			(memq (car val)
+			      '(MAKE-VECTOR MAKE-STRING MAKE-BYTES))
+			(pair? (cdr val))
+			(null? (cddr val)))
+
+		   (outtype-aux doc? indent (cadr type) NONE VOID)
+		   (out CONTLINE "[]" name " = ")
+		   (schlep-alloc indent (cadr type)
+				 (cadr val)
+				 (cddr val))
+		   #f)
+
+		  ;;(outtype-aux doc? indent (cadr type) NONE VOID)
+		  ;;(out CONTLINE name "[")
+		  ;;(schlep-exp SUBSCRIPT INT indent (cadr val))
+		  ;;#f)
+		  ((and (pair? val)
+			(memq (car val) '(MAKE-VECTOR MAKE-BYTES))
+			(pair? (cdr val))
+			(or (null? (cddr val))
+			    (zero? (caddr val))))
+		   (outtype-aux doc? indent (cadr type) NONE VOID)
+		   (out CONTLINE name "[")
+		   (schlep-exp SUBSCRIPT INT indent (cadr val))
+		   (if (not (null? (cddr val)))
+		       (out CONTLINE "= {0}"))
+		   #f)
+		  ((or (and (pair? val)
+			    (memq (car val) '(VECTOR STRING BYTES)))
+		       (string? val)
+		       (vector? val)
+		       (eq? val EXTERN))
+		   (outtype-aux doc? indent (cadr type) "[]" VOID)
+		   (out CONTLINE name)
+		   #t)
+		  (else
+		   ;;(outtype-aux doc? indent (cons 'PTR (cdr type)) name VOID)
+		   (outtype-aux doc? indent (cadr type) "[]" VOID)
+		   (out CONTLINE name)
+		   #t)))
+	   ((FUNCTION)
+	    (out indent "string " name)
+	    #f)
+;;;	   ((FUNCTION)
+;;;	    (out indent (string-append
+;;;			 ((if (symbol? (cadr type)) symbol->string identity)
+;;;			  (cadr type))
+;;;			 "_function ")
+;;;		 name)
+;;;	    #f)
+;;;	   ((FUNCTION)
+;;;	    (outtype indent (cadr type) NONE VOID)
+;;;	    (out CONTLINE "(*" name ")()") #f)
+	   (else (report "unknown type" type name) #f)))
+	(else (report "unknown type" type name) #f)))
+
+(define (outtype indent type name val)
+  (outtype-aux #f indent type name val))
+
+(define (outtype-doc indent type name val)
+  (outtype-aux #t indent type name val))
+
+;;; OUTBINDING - indents and prints out local binding
+(define (outbinding indent b)
+  (let ((type (vartype (car b))))
+    (cond ((var-involved? (car b) (cadr b))
+	   (report "rebinding variable" b)
+	   (outtmpbnd indent (car b) (cadr b))
+	   (outuntmpbnd indent (car b)))
+	  ((outtype indent type (car b) (cadr b))
+	   (out CONTLINE " = ")
+	   (cond ((and (string? (cadr b))
+		       (equal? '(array byte) type))
+		  ;;(out CONTLINE "\"" (cadr b) "\".getBytes();")
+		  (out CONTLINE "stringToBytes(\"" (cadr b) "\");"))
+		 (else
+		  (schlep-exp SEMI (type->exptype type) indent (cadr b)))))
+	  (else
+;;;	   (report "var can't be assigned" b)
+	   (out CONTLINE SEMI)))))
+
+;;; OUTBINDINGS - indents and prints out local bindings
+(define (outbindings indent b)
+  (for-each (lambda (b) (outbinding indent b)) b))
+
+(define (outtmpbnd indent var val)
+  (let ((type (vartype var)))
+    (cond ((outtype indent type (tmpify var) val)
+	   (out CONTLINE " = ")
+	   (schlep-exp SEMI (type->exptype type) indent val))
+	  (else
+	   (report "temp can't be assigned" var val)
+	   (out CONTLINE SEMI)))))
+
+(define (outuntmpbnd indent var)
+  (outtype indent (vartype var) var VOID)
+  (out CONTLINE " = " (tmpify var) SEMI))
+
+;;; OUTLETBINDINGS - indents and prints out local simultaneous bindings
+(define (outletbindings indent bindings types?)
+  (if (not (null? bindings))
+      (let* ((vars (map car bindings))
+	     (exps (map cadr bindings))
+	     (invol (map
+		     (lambda (b)
+		       (if types?
+			   (var-involved? (car b) (map cadr bindings))
+			   (var-involved-except?
+			    (car b) (map cadr bindings) (cadr b))))
+		     bindings)))
+	(for-each
+	 (lambda (v b i) (if i (outtmpbnd indent (car b) (cadr b))))
+	 vars bindings invol)
+;;;	(if types? (outbinding indent (car bindings))
+;;;	    (let ((vtype (vartype (caar bindings))))
+;;;	      (out indent (caar bindings) " = ")
+;;;	      (schlep-exp SEMI (type->exptype vtype) indent (cadar bindings))))
+
+	(for-each
+	 (lambda (v b i)
+	   (let ((type (vartype (car b))))
+	     (cond (i)
+		   ((not types?)
+		    (out indent (car b))
+		    (out CONTLINE " = ")
+		    (schlep-exp SEMI (type->exptype type) indent (cadr b)))
+		   ((outtype indent type (car b) (cadr b))
+		    (out CONTLINE " = ")
+		    (schlep-exp SEMI (type->exptype type) indent (cadr b)))
+		   (else		;(report "can't initialize" b)
+		    (out CONTLINE SEMI)))))
+	 vars bindings invol)
+	(for-each
+	 (lambda (v b i)
+	   (let ((type (vartype (car b))))
+	     (cond (i (if types? (outuntmpbnd indent v)
+			  (out indent v " = " (tmpify v) SEMI))))))
+	 vars bindings invol))))
+
+(define (var-involved-except? var sexps own)
+  (if (null? sexps) #f
+      (if (eq? (car sexps) own)
+	  (var-involved-except? var (cdr sexps) own)
+	  (or (var-involved? var (car sexps))
+	      (var-involved-except? var (cdr sexps) own)))))
+
+(define (var-involved? var sexp)
+  (if (pair? sexp)
+      (or (var-involved? var (car sexp))
+	  (var-involved? var (cdr sexp)))
+      (eq? sexp var)))
+
+(define (outcomment indent str)
+  (cond ((string-index str #\nl)
+	 (set! *output-line* (+ 1 *output-line*))
+	 (report "newline in comment" str)))
+  (out indent "/*" str "*/"))
+
+(define (descmfilify file)
+  (let ((sl (string-length file)))
+    (cond ((< sl 4) file)
+	  ((string-ci=? (substring file (- sl 4) sl) ".scm")
+	   (substring file 0 (- sl 4)))
+	  (else file))))
+
+(define (do-includes)
+  (cond ((not (null? *included-files*))
+	 (display "include files are:") (newline)
+	 (for-each (lambda (f) (write f) (newline)) *included-files*)
+	 (set! *included-files* '())))
+  (newline) (display "done.") (newline))
+
+;Set the output for "indent" indentation.
+(define (out-indent indent)
+  (do ((j indent (- j 32)))
+      ((> 32 j)
+       (do ((i j (- i 1)))
+	   ((>= 0 i))
+	 (display #\space *schlep-output*)))
+    (display slib:tab *schlep-output*)))
+
+(define (out-schlep-comment line)
+  (out-indent GINDENT)
+  (display "/* " *schlep-output*)
+  (display line *schlep-output*)
+  (set! *output-line* (+ 1 *output-line*))
+  (display " */" *schlep-output*)
+  (newline *schlep-output*))
+
+;; Substitute @ macros in string LINE.
+;; Returns a list of strings, the first is the substituted version
+;; of LINE, the rest are "@cindex " directives for Texinfo.
+;; MACS is an alist of (macro-name . macro-value) pairs.
+(define (document-substitute line macs)
+  (define (get-word i)
+    (let loop ((j (+ i 1)))
+      (cond ((>= j (string-length line))
+	     (substring line i j))
+	    ((or (char-alphabetic? (string-ref line j))
+		 (char-numeric? (string-ref line j)))
+	     (loop (+ j 1)))
+	    (else (substring line i j)))))
+  ;;Return (next-char-number . list-of-arguments)
+  (define (get-args i)
+    (let skip ((i i))
+      (cond ((>= i (string-length line)) #f)
+	    ((char-whitespace? (string-ref line i))
+	     (skip (+ i 1)))
+	    ((eqv? (string-ref line i) #\{)
+	     (let loop-args ((i (+ i 1))
+			     (args '()))
+	       (let loop ((j i))
+		 (if (>= j (string-length line))
+		     #f	;;error
+		     (case (string-ref line j)
+		       ((#\,)
+			(loop-args (+ j 1)
+				   (cons (substring line i j) args)))
+		       ((#\})
+			(cons (+ j 1)
+			      (reverse (cons (substring line i j) args))))
+		       (else (loop (+ j 1))))))))
+	    (else #f))))
+  (define (schlepify string)
+    (call-with-output-string
+	(lambda (p)
+	  (schlep-name
+	   (if (char=? #\' (string-ref string 0))
+	       (string-upcase
+		(substring string 1 (string-length string)))
+	       (string-downcase string))
+	   p))))
+  (let loop ((istrt 0)
+	     (i 0)
+	     (res '())
+	     (idxs '()))
+    (cond ((>= i (string-length line))
+	   (cons (apply string-append
+			(reverse
+			 (cons (substring line istrt (string-length line))
+			       res)))
+		 idxs))
+	  ((char=? #\@ (string-ref line i))
+	   (let* ((w (get-word i))
+		  (symw (string->symbol w)))
+	     (cond ((eq? '@cname symw)
+		    (let ((args (get-args (+ i (string-length w)))))
+		      (cond ((and args (= 2 (length args)))
+			     (loop (car args) (car args)
+				   (cons
+				    (string-append
+				     "@code{" (schlepify (cadr args)) "}")
+				    (cons (substring line istrt i) res))
+				   idxs))
+			    (else
+			     (report "@cname wrong number of args" line)
+			     (loop istrt (+ i (string-length w)) res idxs)))))
+		   ((eq? '@dfn symw)
+		    (let* ((args (get-args (+ i (string-length w))))
+			   (inxt (car args))
+			   (args (cdr args)))
+		      (loop inxt inxt
+			    (cons (substring line istrt inxt) res)
+			    (cons (string-append "@cindex " (car args))
+				  idxs))))
+		   ((assq symw macs) =>
+		    (lambda (s)
+		      (if (not (cdr s))
+			  (report "Ambiguous argument macro" symw))
+		      (loop (+ i (string-length w))
+			    (+ i (string-length w))
+			    (cons (or (cdr s) "??")
+				  (cons (substring line istrt i) res))
+			    idxs)))
+		   (else
+		    (if (string->number (substring w 1 (string-length w)))
+			(report "Unmatched argument macro" symw))
+		    (loop istrt (+ i (string-length w)) res idxs)))))
+	  (else (loop istrt (+ i 1) res idxs)))))
+
+
+;; Alist for argument macro definitions.
+(define (document-args->macros args xargs)
+  (define (schlepify sym)
+    (call-with-output-string
+	(lambda (p) (schlep-symbol sym p))))
+  (define (merge-args args1 args2 . argsn)
+    (if (pair? argsn)
+	(apply merge-args (merge-args args1 args2) argsn)
+	(let loop ((a1 (cdr args1))
+		   (a2 (cdr args2))
+		   (res (list (car args1))))
+	  (cond ((null? a1)
+		 (append (reverse res) a2))
+		((null? a2)
+		 (append (reverse res) a1))
+		((eq? (car a1) (car a2))
+		 (loop (cdr a1) (cdr a2) (cons (car a1) res)))
+		(else
+		 (loop (cdr a1) (cdr a2) (cons #f res)))))))
+  (let ((args (if (pair? xargs)
+		  (apply merge-args args xargs)
+		  args)))
+    (let ((m0 (and (car args)
+		   (string-append "@code{" (schlepify (car args)) "}"))))
+      `((@arg0 . ,m0)
+	(@0 . ,m0)
+	,@(let recur ((i 1)
+		      (args (cdr args)))
+	    (if (null? args) '()
+		(let ((s (number->string i))
+		      (m (and (car args)
+			      (string-append "@var{"
+					     (schlepify (car args)) "}"))))
+		  `((,(string->symbol (string-append "@" s)) . ,m)
+		    (,(string->symbol (string-append "@arg" s)) . ,m)
+		    ,@(recur (+ i 1) (cdr args))))))))))
+
+(define (document-fun sexp body xdefs)
+  (define (out-header sexp op)
+    (let ((fun (caadr sexp))
+	  (args (cdadr sexp)))
+      (out 0 op)
+      (outtype-doc CONTLINE (proctype fun) fun VOID)
+      (out CONTLINE " (")
+      (if (pair? args)
+	  (let loop ((args args))
+	    (outtype-doc CONTLINE (vartype (car args)) NONE VOID)
+	    (out CONTLINE "@var{" (car args) "}")
+	    (cond ((pair? (cdr args))
+		   (out CONTLINE COMMA)
+		   (out CONTLINE #\space)
+		   (loop (cdr args))))))
+      (out CONTLINE ")")))
+  (let* ((mac-list (document-args->macros (cadr sexp) (map cadr xdefs)))
+	 (lines (map (lambda (bl) (document-substitute bl mac-list))
+		     body)))
+    (fluid-let ((*schlep-output* *documentation-output*)
+		(*output-line* *output-line*))
+      (out-header sexp "@deftypefun ")
+      (for-each (lambda (def)
+		  (out-header def "@deftypefunx "))
+		xdefs)
+      (for-each (lambda (line) (out 0 line)) (apply append lines))
+      (out 0 "@end deftypefun")
+      (out 0))
+    ;;(for-each (lambda (line) (out-schlep-comment (car line))) lines)
+    ))
+
+(define (document-var sexp body xdefs)
+  (let* ((name (cadr sexp))
+	 (mac-list (document-args->macros (list name) '()))
+	 (lines
+	  (map (lambda (bl) (document-substitute bl mac-list)) body)))
+    (fluid-let ((*schlep-output* *documentation-output*)
+		(*output-line* *output-line*))
+      (out 0 "@deftypevar ")
+      (outtype-doc CONTLINE (vartype name) name
+		   (and (caddr sexp) 'EXTERN))
+      (let loop ((xdefs xdefs))
+	(if (pair? xdefs)
+	    (let ((sexp (car xdefs)))
+	      (and (pair? sexp)
+		   (eq? (car sexp) 'DEFINE)
+		   (pair? (cdr sexp))
+		   (symbol? (cadr sexp)))
+	      (out 0 "@deftypevarx ")
+	      (outtype-doc CONTLINE (vartype (cadr sexp)) (cadr sexp)
+			   (and (caddr sexp) 'EXTERN))
+	      (loop (cdr xdefs)))))
+      (for-each (lambda (line) (out 0 line)) (apply append lines))
+      (out 0 "@end deftypevar")
+      (out 0))
+    ;;(for-each (lambda (line) (out-schlep-comment (car line))) lines)
+    ))
+
+
+;;; SCHLEP1 - schlep file.scm to file.cs
+(define (schlep1 file dest)
+  (define ifile (string-append file ".scm"))
+  (define ofile (string-append dest (capitalize file) ".cs"))
+  (define texname (string-append dest (capitalize file) ".txi"))
+  (cond ((not (file-exists? ifile))
+	 (schlep.usage)
+	 (slib:error 'schlep1 ifile 'not 'found)))
+  (if (null? declarations)
+      (or (read-local-declarations (pathname->vicinity file))
+	  (report (sprintf
+		   #f "No %s.typ file found, all variables will be int" translator))))
+  (fluid-let ((*schlep-input* (open-file ifile "r?"))
+	      ;;(*schlep-output* (open-file ofile "w?"))
+	      ;;(*schlep-output* *cs-output-file*)
+	      (*schlep-input-name* ifile)
+	      (*schlep-output-name* ofile)
+	      (*documentation-output*
+	       (let ()
+		 (display "Texinfo documentation -> ") (write texname) (newline)
+		 (open-file texname "w")))
+	      (*schlep-defmacros* *schlep-defmacros*)
+	      ;;(schlep:features (cons translator slib:features))
+	      (declarations declarations))
+    (set! *output-line* 1)
+    (set! tokcntr 0)
+    (schlep-tops schlep-top)
+
+    (close-input-port *schlep-input*)
+    ;;(close-output-port *schlep-output*)
+    (declarations-report! #f (current-output-port))
+    (close-output-port *documentation-output*)
+    (if (eof-object? (call-with-input-file texname read-char))
+	(delete-file texname))))
+
+(define (schlep-tag!)
+  (define cmt (sprintf #f
+		       "This file was generated by %s from source file \"%s\""
+		       translator
+		       *schlep-input-name*))
+  (out-schlep-comment cmt))
+
+(define (schlep-read port)
+  (fluid-let ((slib:features schlep:features))
+    (let ((expr (read port)))
+      (cond ((not (pair? expr)) expr)
+	    (else
+	     (case (car expr)
+	       ((DECLARE-NAMES PROTOTYPE-STYLE)
+		(apply (slib:eval (car expr)) (map strip-quote (cdr expr)))
+		"")
+	       (else expr)))))))
+
+;;; SCHLEP-TOPS - schlep top level forms.
+(define (schlep-tops schlep-top)
+  (define doc-lines '())
+  (define (tok1 line)
+    (let loop ((i 0))
+      (cond ((>= i (string-length line)) line)
+	    ((or (char-whitespace? (string-ref line i))
+		 (char=? #\; (string-ref line i)))
+	     (substring line 0 i))
+	    (else (loop (+ i 1))))))
+  (define (skip-ws line)
+    (do ((i 0 (+ i 1)))
+	((or (>= i (string-length line))
+	     (not (memv (string-ref line i)
+			'(#\space #\tab #\;))))
+	 (substring line i (string-length line)))))
+  (define (read-cmt-line)
+    (cond ((eqv? #\; (peek-char *schlep-input*))
+	   (read-char *schlep-input*)
+	   (read-cmt-line))
+	  (else (read-line *schlep-input*))))
+  (define (read-newline)
+    (if (char=? #\cr (read-char *schlep-input*))
+	(if (char=? #\nl (peek-char *schlep-input*))
+	    (read-char *schlep-input*)
+	    (report "stranded #\\cr"))))
+  (define (lp c)
+    (cond ((eof-object? c)
+	   (cond ((pair? doc-lines)
+		  (report "No definition found for @body doc lines"
+			  (reverse doc-lines)))))
+	  ((memv c '(#\cr #\nl))
+	   (read-newline)
+	   (set! *output-line* (+ 1 *output-line*))
+	   (newline *schlep-output*)
+	   (lp (peek-char *schlep-input*)))
+	  ((char-whitespace? c)
+	   (write-char (read-char *schlep-input*) *schlep-output*)
+	   (lp (peek-char *schlep-input*)))
+	  ((char=? c #\;)
+	   (schlep-comment c))
+	  (else
+	   (sx))))
+  (define (sx)
+    (let* ((s1 (schlep-read *schlep-input*))
+	   ;;Read all forms separated only by single newlines.
+	   (ss (let recur ()
+		 (case (peek-char *schlep-input*)
+		   ((#\cr #\space #\tab) (read-char *schlep-input*) (recur))
+		   ;; Ignore trailing comments
+		   ((#\;) (read-char *schlep-input*)
+		    (let skip ((c (peek-char *schlep-input*)))
+		      (cond ((eqv? #\nl c) (recur))
+			    ((not (char? c)) '())
+			    (else (read-char *schlep-input*)
+				  (skip (peek-char *schlep-input*))))))
+		   ((#\nl) (read-char *schlep-input*)
+		    (if (eqv? #\( (peek-char *schlep-input*))
+			(cons (schlep-read *schlep-input*) (recur))
+			'()))
+		   (else '())))))
+      (cond ((eof-object? s1))
+	    (else
+	     (schlep-top (if (null? ss) s1 `(DOC-BEGIN ,s1 ,@ss))
+			 (reverse doc-lines))
+	     (set! doc-lines '())
+	     (lp (peek-char *schlep-input*))))))
+  ;;Comments transcribed to generated C source files.
+  (define (schlep-comment c)
+    (cond ((eof-object? c) (lp c))
+	  ((eqv? #\; c)
+	   (read-char *schlep-input*)
+	   (schlep-comment (peek-char *schlep-input*)))
+	  ;; Escape to start Texinfo comments
+	  ((eqv? #\@ c)
+	   (let* ((line (read-line *schlep-input*))
+		  (tok (tok1 line)))
+	     (cond ((or (string=? tok "@body")
+			(string=? tok "@text"))
+		    (set! doc-lines
+			  (cons (skip-ws
+				 (substring line
+					    (string-length tok)
+					    (string-length line)))
+				doc-lines))
+		    (body-cmt (peek-char *schlep-input*)))
+		   (else
+		    (for-each (lambda (l)
+				(newline *documentation-output*)
+				(display l *documentation-output*))
+			      (document-substitute
+			       (if (string=? tok "@")
+				   (skip-ws
+				    (substring line 1 (string-length line)))
+				   line)
+			       '()))
+		    (doc-cmt (peek-char *schlep-input*))))))
+	  ;; Transcribe the comment line to C source file.
+	  (else
+	   (out-schlep-comment (read-line *schlep-input*))
+	   (lp (peek-char *schlep-input*)))))
+  ;;Comments incorporated in generated Texinfo files.
+  ;;Continue adding lines to DOC-LINES until a non-comment
+  ;;line is reached (may be a blank line).
+  (define (body-cmt c)
+    (cond ((eof-object? c) (lp c))
+	  ((eqv? #\; c)
+	   (set! doc-lines (cons (read-cmt-line) doc-lines))
+	   (body-cmt (peek-char *schlep-input*)))
+	  ((memv c '(#\nl #\cr))
+	   (read-newline)
+	   (lp (peek-char *schlep-input*)))
+	  ;; Allow whitespace before ; in doc comments.
+	  ((char-whitespace? c)
+	   (read-char *schlep-input*)
+	   (body-cmt (peek-char *schlep-input*)))
+	  (else
+	   (lp (peek-char *schlep-input*)))))
+  ;;Comments incorporated in generated Texinfo files.
+  ;;Transcribe comments to current position in Texinfo file
+  ;;until a non-comment line is reached (may be a blank line).
+  (define (doc-cmt c)
+    (cond ((eof-object? c) (lp c))
+	  ((eqv? #\; c)
+	   (let* ((ls (document-substitute (read-cmt-line) '())))
+	     (for-each (lambda (l)
+			 (newline *documentation-output*)
+			 (display l *documentation-output*))
+		       ls)
+	     ;;(out-schlep-comment (car ls))
+	     )
+	   (doc-cmt (peek-char *schlep-input*)))
+	  ((memv c '(#\nl #\cr))
+	   (read-newline)
+	   (newline *documentation-output*)
+	   (lp (peek-char *schlep-input*)))
+	  ;; Allow whitespace before ; in doc comments.
+	  ((char-whitespace? c)
+	   (read-char *schlep-input*)
+	   (doc-cmt (peek-char *schlep-input*)))
+	  (else
+	   (newline *documentation-output*)
+	   (lp (peek-char *schlep-input*)))))
+  (schlep-tag!)
+  (cond ((eqv? #\# (peek-char *schlep-input*))
+	 (read-char *schlep-input*)
+	 (cond ((not (eqv? #\! (read-char *schlep-input*)))
+		(report "mysterious first line"))
+	       ((not (find-string-from-port? "!#" *schlep-input*))
+		(report "!# not found")))))
+  (lp (peek-char *schlep-input*)))
+
+(define (do-pragma strs) (for-each (lambda (str) (out 0 str)) strs))
+
+(define (funcalled-in-code? ident tree)
+  (let walk ((tree tree))
+    (cond ((not (pair? tree)) #f)
+	  ((not (list? tree)) #f)
+	  ((eq? 'quote (car tree)) #f)
+	  ((eq? ident (car tree)))
+	  (else (some walk tree)))))
+
+;; BODY must be one, ie a list of one or more forms.
+(define (tailcalled-in-body? ident body)
+  (define (tcalled? form)
+    (cond ((not (pair? form)) #f)
+	  ((eq? ident (car form)) #t)
+	  (else
+	   (case (car form)
+	     ((BEGIN)
+	      (tailcalled-in-body? ident (cdr form)))
+	     ((LET)
+	      (tailcalled-in-body? ident
+				   (if (symbol? (cadr form))
+				       (cdddr form)
+				       (cddr form))))
+	     ((LETREC LET*)
+	      (tailcalled-in-body? ident (cddr form)))
+	     ((IF)
+	      (or (tcalled? (caddr form))
+		  (and (pair? (cdddr form))
+		       (tcalled? (cadddr form)))))
+	     ((AND OR)
+	      (tailcalled-in-body? ident (cdr form)))
+	     ((DO)
+	      (tailcalled-in-body? ident (caddr form)))
+	     ((COND CASE QASE)
+	      (let loop ((clauses (if (eq? (car form) 'COND)
+				      (cdr form)
+				      (cddr form))))
+		(cond ((null? clauses) #f)
+		      ((tailcalled-in-body? ident (car clauses)))
+		      (else (loop (cdr clauses))))))
+	     (else #f)))))
+  (let defloop ((body body))
+    (cond ((null? body) #f)		;This shouldn't happen
+	  ((not (pair? (car body)))
+	   (tcalled? (car (last-pair body))))
+	  ((eq? 'DEFINE (caar body))
+	   (or (and (let ((form (car body)))
+		      (and (pair? (cdr form))
+			   (pair? (cadr form))
+			   (tailcalled-in-body? ident (cddr form)))))
+	       (defloop (cdr body))))
+	  (else
+	   (tcalled? (car (last-pair body)))))))
+
+(define (procedure->schlep-defmacro name proc)
+  (set! *schlep-defmacros*
+	(cons (cons name proc) *schlep-defmacros*)))
+(define (do-defmacro name . body)
+  (define (expn name pattern body)
+    (let ((args (gentemp)))
+      (procedure->schlep-defmacro
+       name
+       (eval `(lambda ,args (destructuring-bind ,pattern ,args ,@body))))))
+  (if (pair? name)
+      (expn (car name) (cdr name) body)
+      (expn name (car body) (cdr body))))
+
+(procedure->schlep-defmacro
+ 'edprintf
+ (lambda (fmt . args)
+   `(tdprintf ,@(jprint (string-append ">>>>ERROR<<<< " fmt) args))))
+
+(procedure->schlep-defmacro
+ 'wdprintf
+ (lambda (fmt . args)
+   `(tdprintf ,@(jprint (string-append "WARNING: " fmt) args))))
+
+(procedure->schlep-defmacro
+ 'dprintf
+ (lambda (fmt . args)
+   `(tdprintf ,@(jprint fmt args))))
+
+(procedure->schlep-defmacro
+ 'sprintf
+ (lambda (print? fmt . args)
+   `(form-str ,@(jprint fmt args))))
+
+(procedure->schlep-defmacro
+ 'printf
+ (lambda (fmt . args)
+   `(tprintf ,@(jprint fmt args))))
+
+(define (schlep-top-doc-begin defs doc)
+  (let ((s1 (car defs)))
+    (cond
+     ((or (not (pair? s1))
+	  (not (memq (car s1) '(DEFINE DEFVAR DEFCONST))))
+      (report "SCHLEP-TOP: no definition found for Texinfo documentation"
+	      doc (car defs)))
+     (else
+      (let ((op1 (car s1))
+	    (proc? (pair? (cadr s1))))
+	(let loop ((ss (cdr defs))
+		   (smatch (list s1)))
+	  (if (and (pair? ss)
+		   (pair? (car ss))
+		   (eq? op1 (caar ss))
+		   (if proc?
+		       (pair? (cadar ss))
+		       (not (pair? (cadar ss)))))
+	      (loop (cdr ss) (cons (car ss) smatch))
+	      (let ((smatch (reverse smatch)))
+		(cond (proc?
+		       (document-fun (car smatch) doc (cdr smatch)))
+		      (else
+		       (document-var (car smatch) doc (cdr smatch))))))))))))
+
+(define (foldr func end lst)
+  (if (null? lst)
+      end
+      (func (car lst) (foldr func end (cdr lst)))))
+
+(define (strip-.scm str)
+  (define substr (substring str 0 (+ -4 (string-length str))))
+  (define (cap-last ls accl accw)
+    (if (null? ls) (reverse (cons (capitalize (list->string (reverse accw))) accl))
+	(if (char=? (car ls) #\.)
+	    (cap-last (cdr ls) (cons (list->string (reverse (cons #\. accw))) accl) '())
+	    (cap-last (cdr ls) accl (cons (car ls) accw)))))
+  (foldr string-append "" (cap-last (string->list substr) '() '())))
+  ;;(capitalize (substring str 0 (+ -4 strlen))))
+
+(define (csharp-imports sexp)
+  (cond ((pair? (memv #\_ (string->list sexp)))	; non static
+	 (string-append "using " (list->string (cdr (string->list sexp))) ";"))
+					; No static imports in csharp.
+	((pair? (memv #\. (string->list sexp)))	; static and contains package info
+	 (string-append "import static " sexp ".*;"))
+	(else
+	 (let ((fullname (string-append *namespace-id* "." sexp))) ; static and needs package info
+	   (string-append "import static " fullname ".*;")))))
+
+(define (emit-namespace-decl)
+  (cond ((and (not *emitted-namespace-decl*)
+	      (not *ignore-classname-generation*))
+	 (if *emitted-class-declaration*
+	     (report "error: Emitted class declaration before namespace decl."))
+	 (out  GINDENT "namespace " *namespace-id* "\n{")
+	 (set! GINDENT (+ GINDENT 2))
+	 (set! *emitted-namespace-decl* #t))))
+
+(define (emit-class-declaration)
+  (cond ((and (not *emitted-class-declaration*)
+	      (not *ignore-classname-generation*))
+	 (out GINDENT "public class " *class-name*)
+	 (out GINDENT  "{")
+	 (set! GINDENT (+ GINDENT 2))
+	 (set! *emitted-class-declaration* #t))))
+
+(define *emitted-class-declaration* #f)
+(define *emitted-namespace-decl* #f)
+
+
+;;; SCHLEP-TOP - schlep top level form sexp.
+(define (schlep-top sexp . doc)
+  (if (pair? doc) (set! doc (car doc)))
+  (if (pair? sexp)
+      (set! sexp
+	    (fluid-let ((*defmacros* *schlep-defmacros*))
+	      (defmacro:expand* sexp))))
+  (cond ((symbol? sexp) (set! *procedure* sexp))
+	((and (pair? sexp) (eq? (car sexp) 'QUOTE))
+	 (set! *procedure* (cadr sexp)))
+	((string? sexp) (outcomment 0 sexp))
+	((not (pair? sexp))
+	 (outcomment 0 sexp)
+	 (report "top level atom?" sexp))
+	(else
+	 (case (car sexp)
+	   ((REQUIRE REQUIRE-IF) #f)
+	   ((DEFMACRO:LOAD)
+	    (defmacro:load (cadr sexp)))
+	   ((PROVIDE)
+	    (let ((expr (cadr sexp)))
+	      (cond ((and (pair? expr)
+			  (eq? 'QUOTE (car expr))
+			  (symbol? (cadr expr))
+			  (null? (cddr expr)))
+		     (set! schlep:features
+			   (cons (cadr expr) schlep:features))))))
+	   ((BEGIN)
+	    (cond ((pair? doc)
+		   (schlep-top (cadr sexp) doc)
+		   (set! doc '())
+		   (for-each schlep-top (cddr sexp)))
+		  (else
+		   (for-each schlep-top (cdr sexp)))))
+	   ((DOC-BEGIN)
+	    (if (pair? doc)
+		(begin
+		  (schlep-top-doc-begin (cdr sexp) doc)
+		  (set! doc '())))
+	    (for-each schlep-top (cdr sexp)))
+	   ((IF) (schlep-top-if (cdr sexp) #t))
+	   ((COND) (schlep-top-cond (cdr sexp)))
+	   ((DEFVAR DEFINE DEFCONST)
+	    (if (pair? (cadr sexp))
+		(let ((ptype (or *procedure* (proctype (caadr sexp)))))
+		  (set! *procedure* (caadr sexp))
+		  (cond ((pair? doc)
+			 (document-fun sexp doc '())
+			 (set! doc '())))
+		  (add-label (caadr sexp) #t (cdadr sexp))
+		  (out GINDENT (if (eq? 'DEFCONST (car sexp))
+				   "public static readonly "
+				   "public static "))
+		  ;;(outtype CONTLINE ptype (caadr sexp) VOID) ;name
+		  (outtype CONTLINE ptype (caadr sexp) VOID) ;name
+		  (out CONTLINE "(")
+		  (if (null? (cdadr sexp))
+		      ;;(out CONTLINE "void")
+		      (out CONTLINE "")
+		      (let ((bs (cdadr sexp)))
+			(outtype CONTLINE (vartype (car bs))
+				 (car bs) VOID)
+			(careful-for-each (lambda (b)
+					    (out CONTLINE COMMA)
+					    (outtype CONTLINE (vartype b)
+						     b VOID))
+					  (cdr bs))))
+		  (out CONTLINE ")")
+		  (out GINDENT "{")
+		  (cond ((tailcalled-in-body? (caadr sexp) (cddr sexp))
+			 ;;(funcalled-in-code? (caadr sexp) (cddr sexp))
+			 (out GINDENT (lblify (caadr sexp)) ":" "while (true) {")
+			 (schlep-maybe-bracketed-begin
+			  RETURN (type->exptype ptype) (+ GINDENT 2) (cddr sexp))
+			 (if (eq? VOID (type->exptype ptype))
+			     (out (+ GINDENT 2) "return;"))
+			 (out GINDENT "}"))
+			(else
+			 (schlep-body RETURN (type->exptype ptype)
+				      (+ GINDENT 2) (cddr sexp))))
+		  (out GINDENT "}")
+		  (rem-label (caadr sexp)))
+		(begin
+		  (cond ((pair? doc)
+			 (document-var sexp doc '())
+			 (set! doc '())))
+		  (out GINDENT (if (eq? 'DEFCONST (car sexp))
+				   "public static readonly "
+				   "public static "))
+		  (outbinding CONTLINE
+			      (list
+			       (cadr sexp)
+			       (cond
+				((and (pair? (cddr sexp))
+				      (pair? (caddr sexp))
+				      (eq? 'QUOTE (caaddr sexp))
+				      (eq? (cadr sexp) (cadr (caddr sexp))))
+				 (set! tokcntr (+ 1 tokcntr)) tokcntr)
+				(else (caddr sexp)))))))
+	    (out GINDENT))
+	   ((PRAGMA.cs)
+	    (do-pragma (cdr sexp)))
+	   ((PRAGMA.c PRAGMA.h) #t)
+	   ((DEFMACRO)
+	    (apply do-defmacro (cdr sexp)))
+	   ((DECLARE-NAMES)
+	    (declare-names (cdr sexp)))
+	   (else (report "SCHLEP-TOP: statement not in procedure" sexp)))
+	 (or (null? doc)
+	     (report
+	      "SCHLEP-TOP: no definition found for Texinfo documentation"
+	      doc sexp))
+	 (set! *procedure* #f))))
+
+(define (has-defines? body)
+  (cond ((null? body) #f)
+	((null? (cdr body)) #f)
+	((not (pair? (car body))) (has-defines? (cdr body)))
+	((eq? 'BEGIN (caar body)) (has-defines? (cdar body)))
+	(else (memq (caar body) '(DEFVAR DEFINE)))))
+
+;;; SCHLEP-BODY - schlep body
+(define (schlep-body termin use indent body)
+  (if (and (not (eq? RETURN termin)) (not (eq? use VOID)))
+      (report "body value not at top level" termin use body))
+  (cond ((not (pair? body))
+	 (if (not (eq? use VOID))
+	     (report "short body?" body)))
+	((null? (cdr body))
+	 (out indent)
+	 (schlep-exp termin use indent (car body)))
+	((string? (car body))
+	 (outcomment indent (car body))
+	 (schlep-body termin use indent (cdr body)))
+	(else
+	 (case (caar body)
+	   ((DEFVAR DEFINE)
+	    (cond ((symbol? (cadar body))
+		   (outbinding indent (cdar body))
+		   (schlep-body termin use indent (cdr body)))
+		  (else (add-label (caadar body) #t (cdadar body))
+			(for-each (lambda (b)
+				    (outtype indent (vartype b) b VOID)
+				    (out CONTLINE SEMI))
+				  (cdadar body))
+			(schlep-body termin use indent (cdr body))
+			(if (and (eq? use VOID) (eq? RETURN termin))
+			    (out indent "return;"))
+			(out 0 (lblify (caadar body)) ":")
+			(schlep-body termin use indent (cddar body))
+			(rem-label (caadar body)))))
+	   ((DECLARE-NAMES)
+	    (fluid-let ((declarations declarations))
+	      (declare-suffixes! (cdar body))
+	      (schlep-body termin use indent (cdr body))))
+	   (else
+	    (out indent)
+	    (schlep-exp SEMI VOID indent (car body))
+	    (schlep-body termin use indent (cdr body)))))))
+
+(define (schlep-goto indent sexp)
+  (define lbls (label-vars (car sexp)))
+  (cond ((eq? RETURN lbls)
+	 (cond ((not (null? (cddr sexp)))
+		(report "too many values to continuation" sexp)))
+	 (out CONTLINE "return ")
+	 (schlep-exp SEMI VAL (+ 7 indent) (cadr sexp)))
+	(else
+	 (let ((lv (filter (lambda (l) (not (eq? (car l) (cadr l))))
+			   (map list lbls (cdr sexp)))))
+	   (cond ((pair? lv)
+		  (out CONTLINE "{")
+		  (outletbindings (+ 2 indent) lv #f)
+		  (out (+ 2 indent) "goto " (lblify (car sexp)) #\;)
+		  (out indent "}"))
+		 (else
+		  (out CONTLINE "goto " (lblify (car sexp)) #\;)))))))
+
+(define (filter pred? lst)
+  (cond ((null? lst) lst)
+	((pred? (car lst))
+	 (cons (car lst) (filter pred? (cdr lst))))
+	(else (filter pred? (cdr lst)))))
+
+;;; LOOKUP - translate from table or return arg as string
+(define (lookup arg tab)
+  (let* ((p (assq arg tab))
+	 (l (if p (cdr p) arg)))
+    (if (symbol? l) (symbol->string l) l)))
+
+(define (schlep-char chr)
+  (cond ((char-alphabetic? chr) (string chr))
+	((char-numeric? chr) (string chr))
+	(else
+	 (case chr
+	   ((#\! #\" #\# #\$ #\% #\& #\( #\) #\* #\+ #\, #\- #\. #\/
+	     #\: #\; #\< #\= #\> #\? #\@
+	     #\[     #\] #\^ #\_ #\`
+	     #\{ #\| #\} #\~)
+	    (string chr))
+	   ((#\') "\\'")
+	   ((#\\) "\\\\")
+	   ((#\newline) "\\n")
+	   ((#\tab) "\\t")
+	   ((#\backspace) "\\b")
+	   ((#\return) "\\r")
+	   ((#\page) "\\f")
+	   ((#\space) " ")
+	   ((#\null) "\\0")
+	   (else
+	    (let ((numstr (number->string (char->integer chr) 8)))
+	      (string-append
+	       "\\" (make-string (- 3 (string-length numstr)) #\0) numstr)))))))
+
+(define (comma-list sym)
+  (define ls (map symbol->string sym))
+  (define fls (lambda (ls str)
+		(if (pair? ls)
+		    (fls (cdr ls) (string-append str ", " (car ls)))
+		    str)))
+  (if (pair? ls) (fls (cdr ls) (car ls))
+      (car ls)))
+
+;;; SCHLEP-EXP - schlep expression
+(define (schlep-exp termin use indent sexp)
+  (cond ((not (pair? sexp))		;atoms
+	 (cond ((eq? RETURN termin)	;return from here
+		(case use
+		  ((VOID)		;shouldn't happen
+		   (cond (sexp (report "void function returning?" sexp)
+			       (schlep-exp SEMI use indent sexp)))
+		   (out indent "return;"))
+		  (else
+		   (out CONTLINE "return ")
+		   (schlep-exp SEMI use (+ 7 indent) sexp))))
+	       ((string? sexp)
+		(let ((icnt (if (> (string-length sexp) 80) 0 #f)))
+		  (out CONTLINE "\"")
+		  (cond ((<= 60 (string-length sexp) 80)
+			 ;;(out CONTLINE "\\")
+			 ;;(out 0)
+			 ))
+		  (for-each (lambda (c)
+			      (cond ((not icnt))
+				    ((zero? (modulo icnt 16))
+				     (set! icnt (+ 1 icnt))
+				     (out CONTLINE "\\")
+				     (out 0))
+				    (else
+				     (set! icnt (+ 1 icnt))))
+			      (out CONTLINE
+				   (case c
+				     ((#\") "\\\"")
+				     ((#\') "'")
+				     (else (schlep-char c)))))
+			    (string->list sexp))
+		  (out CONTLINE "\"" termin)))
+	       ((and (number? sexp) (inexact? sexp))
+		(out CONTLINE sexp termin))
+	       ((integer? sexp)
+;;;		(cond ((and (>= sexp 65536) (not (eq? use LONG)))
+;;;		       (report "Large Constant used in non-LONG context"
+;;;			       sexp)))
+		(out CONTLINE
+		     (if (or (and (eq? use LONG) (not (negative? sexp)))
+			     (> sexp 9))
+			 (string-append "0x" (number->string sexp 16)
+					(if (eq? use LONG) "L" ""))
+			 sexp)
+		     termin))
+	       ((char? sexp)
+		(out CONTLINE "'" (schlep-char sexp) "'" termin))
+	       ((vector? sexp)
+		(out CONTLINE "{\n\t")
+		(set! *output-line* (+ 1 *output-line*))
+		(infix-schlep-exp VAL ",\n\t" indent (vector->list sexp))
+		(out CONTLINE "\n\t}" termin)
+		(set! *output-line* (+ 1 *output-line*)))
+	       ((eq? VOID use)
+		(if sexp (report "returning value?" sexp))
+		(out CONTLINE termin))
+	       (else (out CONTLINE
+			  (case sexp
+			    ((#f) (case use
+				    ((BOOL BOOLEAN) 'false)
+				    ;; ((INT INTEGER) '0)
+				    ;; ((BYTE) '0)
+				    ;; ((DOUBLE) '0.0)
+				    ;; ((LONG) '0L)
+				    (else 'null)))
+			    ((#t) (case use
+				    ((BOOL BOOLEAN) '(true))
+				    ;; ((INT INTEGER) '1)
+				    ;; ((BYTE) '1)
+				    ;; ((LONG) '1L)
+				    (else 'true)))
+			    (else sexp))
+			  termin))))
+	((and (pair? (car sexp))
+	      (eq? 'LAMBDA (caar sexp)))
+	 (schlep-exp termin use indent
+		     (append (list 'LET (map list (cadar sexp) (cdr sexp)))
+			     (cddar sexp))))
+	((case (car sexp)
+	   ((IF)
+	    (schlep-if termin use indent (cdr sexp) #t) #t)
+	   ((OR)
+	    (schlep-or termin use indent (cdr sexp)) #t)
+	   ((AND)
+	    (schlep-and termin use indent (cdr sexp)) #t)
+	   ((COND)
+	    (schlep-cond termin use indent (cdr sexp)) #t)
+	   ((BEGIN)
+	    (schlep-begin termin use indent (cdr sexp)) #t)
+	   ((DO)
+	    (schlep-do termin use indent (cdr sexp)) #t)
+	   ((LET)
+	    (schlep-let termin use indent (cdr sexp)) #t)
+	   ((LET*)
+	    (schlep-let* termin use indent (cdr sexp)) #t)
+	   ((CASE QASE)
+	    (schlep-case termin use indent (cdr sexp)) #t)
+	   ((QUOTE)
+	    (schlep-exp
+	     termin use indent
+	     (cond ((or (number? (cadr sexp))
+			(string? (cadr sexp))
+			(vector? (cadr sexp)))
+		    (cadr sexp))
+		   ((symbol? (cadr sexp))
+		    (call-with-output-string
+			(lambda (stp)
+			  (schlep-symbol (cadr sexp) stp))))
+		   (else (report "quoted type not handled" sexp)
+			 #f)))
+	    #t)
+	   ((EXIT)
+	    (out CONTLINE "Environment.Exit(")
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE ");"))
+	   ((CALL-WITH-CURRENT-CONTINUATION)
+	    (schlep-call-with-current-continuation
+	     termin use indent (cdr sexp)) #t)
+	   ((PRAGMA.cs)
+	    (do-pragma (cdr sexp)) #t)
+	   (else
+	    (and (label? (car sexp))
+		 (cond
+		  ((or (eq? RETURN termin)
+		       (and (eq? SEMI termin) (eq? use VOID)))
+		   (schlep-goto indent sexp)
+		   #t)
+		  (else
+		   (if (eq? (car sexp) *procedure*) #f
+		       (report "internal recursion not tail recursion" sexp
+			       "termin=" termin))
+		   #f))))))
+	(else
+	 (cond ((and (eq? RETURN termin) (not (eq? use VOID)))
+		(out CONTLINE "return ")
+		(set! indent (+ 7 indent))))
+	 (case (car sexp)
+	   ((CURRENT-ERROR-PORT) (out CONTLINE "stderr"))
+	   ((CURRENT-OUTPUT-PORT) (out CONTLINE "stdout"))
+	   ((CURRENT-INPUT-PORT) (out CONTLINE "stdin"))
+	   ((CURRENT-TIME)
+	    (out CONTLINE "(int)(DateTime.Now.Ticks/10000000L)"))
+	   ((CURRENT-DTIME)
+	    (out CONTLINE "(DateTime.Now.Ticks/1e10)"))
+	   ((FUNC)
+	    ;;todo: infer the return type of the function.
+	    (let* ((args (schlep-name2 (comma-list (cdr sexp))))
+		   (exp (string-append "invokeFunc(func, " args)))
+	      (out CONTLINE exp)
+	      (out CONTLINE ")")))
+	   ((BYTES<?)
+	    (schlep-exp NONE VAL indent `(BYTES>? ,@(reverse (cdr sexp)))))
+	   ((BYTES<=?)
+	    (schlep-exp NONE VAL indent `(NOT (BYTES>? ,@(cdr sexp)))))
+	   ((BYTES>=?)
+	    (schlep-exp NONE VAL indent `(NOT (BYTES>? ,@(reverse (cdr sexp))))))
+	   ;;((EQUAL?) (schlep-exp NONE VAL indent `(BYTES=? ,@(cdr sexp))))
+	   ((ODD?)
+	    (out CONTLINE "(1&(")
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE "))"))
+	   ((EVEN?)
+	    (out CONTLINE "(!(1&(")
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE ")))"))
+	   ((LOGBIT?)
+	    (out CONTLINE "(0 != ((1<<(")
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE ")) & (")
+	    (schlep-exp NONE VAL indent (caddr sexp))
+	    (out CONTLINE ")))"))
+	   ((LENGTH)
+	    (out CONTLINE (cadr sexp))
+	    (out CONTLINE ".Length;"))
+
+	   ((BIT-EXTRACT BIT-FIELD)	; this was commented out; why?
+	    (let ((n (cadr sexp))
+		  (start (caddr sexp))
+		  (end (cadddr sexp)))
+	      (schlep-exp NONE VAL indent
+			  `(logand (- (ash 2 ,(- end start)) 1)
+				   (ash ,n ,(- start))))))
+	   ((TDPRINTF)
+	    (out CONTLINE "Console.Error.Write(")
+	    (infix-schlep-exp VAL #\+ 4 (cdr sexp))
+	    (out CONTLINE ")"))
+	   ((TPRINTF)
+	    (out CONTLINE "Console.Out.Write(")
+	    (infix-schlep-exp VAL #\+ 4 (cdr sexp))
+	    (out CONTLINE ")"))
+	   ((FORCE-OUTPUT)
+	    (cond ((eq? 'diagout (cadr sexp))
+		   ;;(out CONTLINE "Console.out")
+		   )
+		  (else
+		   (schlep-exp NONE VAL indent (cadr sexp))
+		   (out CONTLINE ".Flush()"))))
+	   ((FORM-STR)
+	    (cond ((equal? (cadr sexp) "%#a")
+		   (out CONTLINE "bytesToString")
+		   (infix-schlep-exp VAL #\+ 4 (cddr sexp))) ;strip formatting.
+		  (else
+		   (out CONTLINE "(")
+		   (infix-schlep-exp VAL #\+ 4 (cdr sexp))
+		   (out CONTLINE ")"))))
+	   ((SET!)
+	    (if (not (eq? use void)) (report "returning void?" sexp))
+	    (out CONTLINE (cadr sexp) " = ")
+	    (schlep-exp NONE (type->exptype (vartype (cadr sexp))) indent (caddr sexp)))
+	   ((VECTOR-SET!)
+	    (if (not (eq? use void)) (report "returning void?" sexp))
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE "[")
+	    (schlep-exp NONE VAL indent (caddr sexp))
+	    (out CONTLINE "]" " = ") ;TBD could be smarter about type of expression in vector-set!
+	    (schlep-exp NONE VAL indent (cadddr sexp)))
+	   ((STRING-SET!)
+	    (if (not (eq? use void)) (report "returning void?" sexp))
+	    (out CONTLINE "stringSet(")
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE ", ")
+	    (schlep-exp NONE VAL indent (caddr sexp))
+	    (out CONTLINE ", ")
+	    (schlep-exp NONE VAL indent (cadddr sexp))
+	    (out CONTLINE ")"))
+	   ((BYTE-SET!)
+	    (if (not (eq? use void)) (report "returning void?" sexp))
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (out CONTLINE "[")
+	    (schlep-exp NONE VAL indent (caddr sexp))
+	    (out CONTLINE "]" " = (byte) (")
+	    (schlep-exp NONE VAL indent `(logand #xff ,(cadddr sexp)))
+	    (out CONTLINE ")"))
+	   ((ARRAY-SET!)
+	    (if (not (eq? use void)) (report "returning void?" sexp))
+	    (schlep-exp NONE VAL indent (cadr sexp))
+	    (schlep-array-indexes indent (cdddr sexp))
+	    (out CONTLINE " = ") ;TBD could be smarter about type of expression in vector-set!
+	    (schlep-exp NONE VAL indent (caddr sexp)))
+	   ((FREE!)
+	    (set! termin NONE)
+	    (set! use VAL))
+	   ((BYTE-REF)
+	    (out CONTLINE "(")
+	    (schlep-exp NONE VAL CONTLINE (cadr sexp))
+	    (schlep-array-indexes indent (cddr sexp))
+	    (out CONTLINE " & 0xFF)"))
+	   ((STRING-REF)
+	    (schlep-exp NONE VAL CONTLINE (cadr sexp))
+	    (schlep-array-indexes indent (cddr sexp)))
+	   ((VECTOR-REF ARRAY-REF)
+	    (schlep-exp NONE VAL CONTLINE (cadr sexp))
+	    (schlep-array-indexes indent (cddr sexp)))
+	   ((BYTES STRING)
+	    (out CONTLINE "bytes(")
+	    (if (pair? (cdr sexp))
+		(let ((bs (cdr sexp)))
+		  (out CONTLINE "(byte)(")
+		  (schlep-exp NONE VAL CONTLINE (car bs))
+		  (out CONTLINE ")")
+		  (careful-for-each (lambda (b)
+				      (out CONTLINE COMMA)
+				      (out CONTLINE "(byte)(")
+				      (schlep-exp NONE VAL CONTLINE b)
+				      (out CONTLINE ")"))
+				    (cdr bs))))
+	    (out CONTLINE ")" ))
+	   ((VECTOR)
+	    (out CONTLINE "{")
+	    (infix-schlep-exp use "," (+ 2 indent) (cdr sexp))
+	    (out CONTLINE "}"))
+	   ((VECTOR-SET-LENGTH!)
+	    (out-typecheck (vartype (cadr sexp)))
+	    (out CONTLINE "resizeArray(")
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ", (int)(")
+	    (schlep-exp NONE use (+ 2 indent) (caddr sexp))
+	    (out CONTLINE "))"))
+					;(out CONTLINE ") * (sizeof (void *)))"))
+	   ((OFFSET-ARRAY)		; unadvertised
+	    (out CONTLINE "&(")
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE "[")
+	    (schlep-exp NONE use (+ 4 indent) `(ash ,(caddr sexp) -2))
+	    (out CONTLINE "])"))
+	   ((MAKE-VECTOR)
+	    (if (eq? use 'VAL)
+		(set! use "int "))
+	    (schlep-alloc indent use
+			  (cadr sexp)
+			  (cddr sexp)))
+	   ((ARG-CLASS)
+	    (cond
+	     ((null? (cadr sexp))
+	      (out CONTLINE "null"))
+	     (else
+	      (let* ((args (map (lambda (str)
+				  (string->symbol
+				   (string-append str ".class"))) (cdr sexp))))
+		(out CONTLINE "new Class[]{" (comma-list args))
+		(out CONTLINE "}")))))
+	   ((MAKE-ARRAY)
+	    (let ((prot (cadr sexp)))
+	      (cond ((string? prot)
+		     (schlep-alloc indent 'char
+				   (caddr sexp)
+				   (and (not (equal? "" prot))
+					(list (string-ref (cadr prot) 0)))))
+		    ((vector? prot)
+		     (schlep-exp NONE use (+ 2 indent)
+				 (if (zero? (vector-length prot))
+				     (cons 'make-vector (cddr sexp))
+				     `(make-vector ,(caddr sexp)
+						   ,(vector-ref port 0)))))
+		    ((pair? prot)
+		     (schlep-alloc indent
+				   (case (car prot)
+				     ((A:floR64b) 'double)
+				     ((A:floR32b) 'float)
+				     ((A:fixZ32b) 'long)
+				     ((A:fixN32b) "unsigned long")
+				     ((A:fixZ16b) 'short)
+				     ((A:fixN16b) "unsigned short")
+				     ((A:fixZ8b) 'byte)
+				     ((A:fixN8b) "unsigned char")
+				     (else
+				      (report 'MAKE-ARRAY 'unknown 'type prot)))
+				   (caddr sexp)
+				   (cdr prot)))
+		    (else (report "weird init " prot)))))
+	   ((VECTOR-LENGTH BYTES-LENGTH STRING-LENGTH
+			   OUTPUT-PORT? INPUT-PORT?
+			   CLOSE-PORT)
+	    (schlep-exp NONE VAL (+ 2 indent) (cadr sexp))
+	    (out CONTLINE
+		 (cdr (assq (car sexp)
+			    '((VECTOR-LENGTH . ".Length")
+			      (BYTES-LENGTH . ".Length")
+			      (STRING-LENGTH . ".Length")
+			      (OUTPUT-PORT? . ".CanWrite")
+			      (INPUT-PORT? . ".CanWrite")
+			      (CLOSE-PORT . ".Close()"))))))
+	   ((SUBSTRING)
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ".Substring(")
+	    (schlep-exp NONE use (+ 2 indent) (caddr sexp))
+	    (out CONTLINE ", ")
+	    (schlep-exp NONE use (+ 2 indent) `(- ,(cadddr sexp) ,(caddr sexp)))
+	    (out CONTLINE ")"))
+	   ((REPLACE-SUFFIX)
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ".Replace(")
+	    (schlep-exp NONE use (+ 2 indent) (caddr sexp))
+	    (out CONTLINE ", ")
+	    (schlep-exp NONE use (+ 2 indent) (cadddr sexp))
+	    (out CONTLINE ")"))
+	   ((STARTS-WITH?)
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ".StartsWith(")
+	    (infix-schlep-exp use "," (+ 2 indent) (cddr sexp))
+	    (out CONTLINE ")"))
+	   ((ENDS-WITH?)
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ".EndsWith(")
+	    (schlep-exp NONE VAL CONTLINE (caddr sexp))
+	    (out CONTLINE ")"))
+	   ((STRING-INDEX-OF SUBSTRING-INDEX-OF)
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ".IndexOf(")
+	    (infix-schlep-exp use "," (+ 2 indent) (cddr sexp))
+	    (out CONTLINE ")"))
+	   ((CHAR-UPCASE CHAR-DOWNCASE)
+	    (out CONTLINE
+		 "(int) Char."
+		 (cadr (assq (car sexp)
+			     '((CHAR-UPCASE "ToUpper")
+			       (CHAR-DOWNCASE "ToLower"))))
+		 "((char) ")
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ")"))
+	   ((NUMBER?) (out CONTLINE "true")) ; CHAR?
+	   ((NUMBER->STRING)
+	    (cond ((= 2 (length (cdr sexp)))
+		   (out CONTLINE "Convert.ToString")
+		   (infix-schlep-exp INT #\, (+ 2 indent) (cdr sexp)))
+		  (else
+		   (report 'unhandled sexp)
+		   (out CONTLINE "numberToString")
+		   (infix-schlep-exp INT #\, (+ 2 indent) (cdr sexp)))))
+	   ((ZERO? NEGATIVE? POSITIVE? LOGNOT INTEGER->CHAR MAKE-STRING
+		   STRING->NUMBER ATOLL ATOF CHAR->INTEGER)
+	    (out CONTLINE
+		 (lookup (car sexp)
+			 '((ZERO? . "0==")
+			   (NEGATIVE? . "0 > ")
+			   (POSITIVE? . "0 < ")
+			   (LOGNOT . "~")
+			   (INTEGER->CHAR . "")
+			   (MAKE-STRING . "new String")
+			   (STRING->NUMBER . "Int32.Parse")
+			   (ATOLL . "Int64.Parse")
+			   (ATOF . "Double.Parse")
+			   (CHAR->INTEGER . "")
+			   ))
+		 "(")
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE ")"))
+	   ((MAX MIN EXPT)
+	    (schlep-symbol (car sexp) *schlep-output*)
+	    (infix-schlep-exp use #\, (+ 2 indent) (cdr sexp)))
+	   ((MAKE-BYTES)
+	    (out CONTLINE "new byte[")
+	    (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+	    (out CONTLINE "]"))
+	   ((NOT)
+	    (cond ((and (pair? (cadr sexp))
+			(memq (caadr sexp) '(NOT)))
+		   (schlep-test indent (cadadr sexp)))
+		  ((and (pair? (cadr sexp))
+			(memq (caadr sexp) '(= EQ? EQV? CHAR=?)))
+		   (schlep-exp NONE use indent
+			       (cons '!=-internal (cdadr sexp))))
+		  (else (out CONTLINE "!(")
+			(schlep-test indent (cadr sexp))
+			(out CONTLINE ")"))))
+	   ((-)
+	    (cond ((= 2 (length sexp))
+		   (out CONTLINE
+			"-(")
+		   (schlep-exp NONE use (+ 2 indent) (cadr sexp))
+		   (out CONTLINE ")"))
+		  ((> (length sexp) 2)
+		   (infix-schlep-exp use "-" indent (cdr sexp)))
+		  (else (report "strange `-' expression " sexp))))
+	   ((ASH ARITHMETIC-SHIFT)
+	    (let ((arg2 (caddr sexp)))
+	      (cond ((and (pair? arg2)
+			  (null? (cddr arg2))
+			  (eq? '- (car arg2)))
+		     (infix-schlep-exp use ">>" indent
+				       (list (cadr sexp) (cadr arg2))))
+		    ((not (number? arg2))
+		     ;;(report "shift by variable?" sexp)
+		     (infix-schlep-exp use "<<" indent (cdr sexp)))
+		    ((zero? arg2)
+		     (schlep-exp NONE use indent (cadr sexp)))
+		    ((positive? arg2)
+		     (infix-schlep-exp use "<<" indent (cdr sexp)))
+		    (else
+		     (infix-schlep-exp use ">>" indent
+				       (list (cadr sexp) (- arg2)))))))
+	   ((+ * / REMAINDER MODULO QUOTIENT LOGIOR LOGAND LOGXOR)
+	    (infix-schlep-exp use
+			      (lookup (car sexp)
+				      '((REMAINDER . %)
+					(MODULO . %)
+					(/ . /)
+					(QUOTIENT . /)
+					(LOGIOR . \|)
+					(LOGAND . &)
+					(LOGXOR . ^)))
+			      indent
+			      (cdr sexp)))
+	   ((LOGTEST)
+	    (out CONTLINE "0 != (")
+	    (schlep-exp termin 'INT (+ 2 indent) (cons 'LOGAND (cdr sexp)))
+	    (out CONTLINE ")"))
+	   ((< > = <= >= EQ? EQV? CHAR<? CHAR>? CHAR<=? CHAR>=? CHAR=?
+	       !=-internal STRING=?)
+	    (case (length (cdr sexp))
+	      ((0 1) (report "to few arguments to comparison operator:" sexp)
+	       (schlep-exp NONE use indent #t))
+	      ((2)
+	       (infix-schlep-exp
+		VAL (lookup (car sexp)
+			    '((= . ==)
+			      (!=-internal . !=)
+			      (EQ? . ==) (EQV? . ==) (CHAR<? . <) (CHAR>? . >)
+			      (CHAR<=? . <=) (CHAR>=? . >=) (CHAR=? . ==)
+			      (STRING=? . ==)))
+		indent
+		(cdr sexp)))
+	      (else (schlep-exp "" use indent
+				`(and (,(car sexp) ,(cadr sexp) ,(caddr sexp))
+				      (,(car sexp) ,@(cddr sexp)))))))
+	   ((PRAGMA.cs)
+	    (do-pragma (cdr sexp)) #t)
+	   (else
+	    (cond ((pair? (car sexp))	;computed function
+		   (out indent "(*(")
+		   (schlep-exp NONE VAL (+ 3 indent) (car sexp))
+		   (out CONTLINE "))")
+		   (out (+ 2 indent)))
+		  (else (out CONTLINE (car sexp))))
+	    (infix-schlep-exp VAL #\, (+ 2 indent) (cdr sexp))))
+	 (cond ((eq? VOID use)
+;;;		(if (not (eq? VOID (proctype (car sexp))))
+;;;		    (report "void function returning?" sexp))
+		(out CONTLINE (if (eq? COMMA termin) COMMA SEMI))
+		(if (eq? RETURN termin) (out indent "return;"))
+		)
+	       ((eq? RETURN termin)
+		(out CONTLINE ";"))
+	       (else (out CONTLINE termin))))))
+
+(define (schlep-array-indexes indent idxs)
+  (for-each (lambda (idx)
+	      (out CONTLINE #\[)
+	      (schlep-exp NONE VAL indent idx)
+	      (out CONTLINE #\]))
+	    idxs))
+
+(define (schlep-alloc indent type numelts initv)
+  (cond ((and (pair? type) (eq? 'ARRAY (car type)))
+	 (set! type (cadr type))))
+  (cond ((null? initv)
+	 (out CONTLINE "new " type "[")
+	 ;;(schlep-exp NONE 'LONG (+ 2 indent) numelts)
+	 (schlep-exp NONE  'INTEGER (+ 2 indent) numelts)
+	 (out CONTLINE "]"))
+	(else
+	 (if (not (member (car initv) '(#f () 0)))
+	     (report "cannot initialize to other than 0 " initv))
+	 (out CONTLINE "new " type "[")
+	 (schlep-exp NONE  'INTEGER (+ 2 indent) numelts)
+	 ;;(schlep-exp NONE 'LONG (+ 2 indent) numelts)
+	 (out CONTLINE "]"))))
+
+(define (schlep-call-with-current-continuation termin use indent sexp)
+  (cond ((not (null? (cdr sexp)))
+	 (report
+	  "ignoring extra args to call-with-current-continuation:"
+	  sexp)))
+  (cond ((not (and (pair? (car sexp))
+		   (list? (car sexp))
+		   (eq? 'LAMBDA (caar sexp))))
+	 (report "Schlep can't pass continuations: " sexp)))
+  (cond ((not (or (eq? use VOID)
+		  (eq? RETURN termin)))
+	 (report "Sticky continuation value: " use termin)))
+  (add-label (caadar sexp) #t (if (eq? use VOID) '() RETURN))
+  (schlep-body termin use indent (cddar sexp))
+  (cond ((eq? use VOID)
+	 (out GINDENT (lblify (caadar sexp)) ":" "while (true)")))
+  (rem-label (caadar sexp)))
+
+(define (schlep-begin termin use indent exps)
+  (cond ((null? exps) (outcomment CONTLINE "null begin?"))
+	((null? (cdr exps))
+	 (schlep-exp termin use indent (car exps)))
+	(else
+	 (schlep-bracketed-begin termin use indent exps))))
+
+(define (schlep-bracketed-begin termin use indent exps)
+  (cond ((and (pair? exps)
+	      (null? (cdr exps))
+	      (pair? (car exps))
+	      (or (not (eq? use VOID))
+		  (memq (caar exps) '(BEGIN DO LET LET*))))
+	 (schlep-exp termin use indent (car exps)))
+	(else
+	 (out CONTLINE "{")
+	 (schlep-body termin use (+ 2 indent) exps)
+	 (out indent "}"))))
+
+;;; SCHLEP-EXPS - schlep expressions separated by commas
+(define (schlep-exps use indent exps)
+  (cond ((null? (cdr exps))
+	 (schlep-exp NONE use indent (car exps)))
+	(else
+	 (schlep-exp COMMA VOID indent (car exps))
+					;VOID causes if statements inside parenthesis.
+	 (schlep-exps use indent (cdr exps)))))
+
+(define (clause->sequence clause)
+  (cond ((not (pair? clause)) (report "bad clause" clause) clause)
+	((null? (cdr clause)) (car clause))
+	(else (cons 'BEGIN clause))))
+
+(define (schlep-cond termin use indent clauses)
+  (cond ((null? clauses)
+	 (report "cond as return value has no else clause")
+	 ;; What should this value be?
+	 (out CONTLINE 0))
+	(else
+	 (let* ((clause (car clauses)))
+	   (cond ((null? (cdr clause))
+		  (schlep-or termin use indent
+			     (list (car clause)
+				   (cons 'COND (cdr clauses)))))
+		 ((eq? 'ELSE (car clause))
+		  (schlep-begin termin use indent (cdr clause)))
+		 ((not (null? (cdr clauses)))
+		  (schlep-if termin use indent
+			     (list (car clause)
+				   (clause->sequence (cdr clause))
+				   (cons 'COND (cdr clauses)))
+			     #t))
+		 (else
+		  (schlep-if termin use indent
+			     (list (car clause)
+				   (clause->sequence (cdr clause)))
+			     #t)))))))
+
+(define (schlep-test indent test)
+  (cond ((bool-exp? test)
+	 (schlep-exp NONE BOOL (+ 4 indent) test))
+	(else
+	 (out CONTLINE "a2b(")
+	 (schlep-exp NONE BOOL (+ 4 indent) test)
+	 (out CONTLINE ")"))))
+
+(define (schlep-if termin use indent exps sense)
+  (define test (car exps))
+  (define consequent (cadr exps))
+  (define alternate (if (null? (cddr exps)) #f (caddr exps)))
+;;; What does this line do?
+  (if (and (not alternate) (equal? "char" use)) (set! alternate 'unused_char))
+  (case (and (pair? test) (car test))
+    ((NOT) (schlep-if termin use indent
+		      `(,(cadr test) ,@(cdr exps)) (not sense)))
+    (else
+     (cond ((not (and (pair? test) (eq? 'BEGIN (car test)))))
+	   ((= 1 (length (cdr test)))
+	    (set! test (cadr test)))
+	   (else
+	    (schlep-body
+	     SEMI VOID indent (but-last-pair (cdr test)))
+	    (out indent)
+	    (set! test (car (last-pair (cdr test))))))
+
+     (cond
+      ((and (not (eq? RETURN termin)) (not (eq? use VOID)))
+       (out CONTLINE "(")
+       (schlep-test indent (if sense test (list 'not test)))
+       (out (+ 2 indent) "?")
+       (schlep-exp NONE use (+ 2 indent) consequent)
+       (out (+ 2 indent) ":")
+       (if (null? (cddr exps))
+	   (report "value from if missing" exps)
+	   (schlep-exp NONE use (+ 2 indent) alternate))
+       (out CONTLINE ")" termin))
+      (else
+       (out CONTLINE "if (")
+       (schlep-test indent (if sense test (list 'not test)))
+       (out CONTLINE ")")
+       (out (+ 2 indent))
+       (cond ((null? (cddr exps))
+	      (schlep-begin termin use (+ 2 indent) (cdr exps))) ;no else
+	     (else			;have an else clause
+	      (if (and (eq? use VOID) consequent)
+		  (schlep-bracketed-begin
+		   termin use (+ 2 indent) (list consequent))
+		  (schlep-begin termin use (+ 2 indent) (list consequent)))
+	      (out indent "else ")
+	      (schlep-begin termin use indent (cddr exps)))))))))
+
+(define (schlep-or termin use indent exps)
+  (if (eq? RETURN termin)
+      (case (length exps)
+	((0) (if (eq? VOID use)
+		 (out CONTLINE "return;")
+		 (out CONTLINE "return false;")))
+	((1) (if (eq? BOOL use)
+		 (schlep-test indent (car exps))
+		 (schlep-exp termin use indent (car exps))))
+	(else
+	 (case use
+	   ((BOOL) (out CONTLINE "return ")
+	    (schlep-or SEMI use (+ 7 indent) exps))
+	   ((VOID) (schlep-or SEMI use indent exps)
+	    (out indent "return;"))
+	   (else
+	    (cond ((symbol? (car exps))
+		   (schlep-if
+		    termin use indent
+		    (list (car exps) (car exps) (cons 'OR (cdr exps)))
+		    #t))
+		  (else
+		   (let ((procedure-tmp-symbol
+			  (tmpify (symbol-append indent *procedure*))))
+		     (schlep-let* termin use indent
+				  `(((,procedure-tmp-symbol ,(car exps)))
+				    (or ,procedure-tmp-symbol ,@(cdr exps)))))))))))
+      (case (length exps)
+	((0) (out CONTLINE 0))
+	((1) (if (eq? BOOL use)
+		 (schlep-test indent (car exps))
+		 (schlep-exp termin use indent (car exps))))
+	(else
+	 (case use
+	   ((VAL LONG)
+	    (cond ((symbol? (car exps))
+		   (schlep-if termin use indent (cons (car exps) exps) #t))
+		  (else
+		   (report "OR of values treated as booleans" exps)
+		   (out CONTLINE "(")
+		   (infix-schlep-exp BOOL " || " indent exps)
+		   (out CONTLINE ")" termin))))
+	   ((BOOL)
+	    (out CONTLINE "(")
+	    (infix-test-schlep-exp " || " indent exps)
+	    (out CONTLINE ")" termin))
+	   ((VOID)
+	    (schlep-if termin use indent
+		       (list (car exps) #f (cons 'OR (cdr exps)))
+		       #t)))))))
+
+(define (schlep-and termin use indent exps)
+  (case (length exps)
+    ((0) (out CONTLINE (if termin "" "return ") "true"))
+    ((1) (if (eq? BOOL use)
+	     (schlep-test indent (car exps))
+	     (schlep-exp termin use indent (car exps))))
+    (else
+     (case use
+       ((BOOL)
+	(cond ((eq? RETURN termin)
+	       (out CONTLINE "return ")))
+	(infix-test-schlep-exp " && " indent exps)
+	(cond ((eq? RETURN termin) (out CONTLINE SEMI))
+	      (else (out CONTLINE termin))))
+       ((VOID)
+	(cond (termin
+	       (schlep-if termin use indent
+			  (list (cons 'AND (but-last-pair exps))
+				(car (last-pair exps))
+				#f)
+			  #t))
+	      (else (schlep-and SEMI use indent exps)
+		    (out indent "return;"))))
+       (else
+	(schlep-if termin use indent (list (car exps)
+					   (cons 'AND (cdr exps))
+					   #f)
+		   #t))))))
+;;(else (out indent "use is" use))
+
+(define (but-last-pair lst)
+  (cond ((null? (cdr lst)) '())
+	(else
+	 (cons (car lst) (but-last-pair (cdr lst))))))
+
+(define (schlep-let termin use indent exps)
+  (cond ((symbol? (car exps))
+	 (add-label (car exps) #t (map car (cadr exps)))
+	 (out CONTLINE "{")
+	 (outletbindings (+ 2 indent) (cadr exps) #t)
+	 (out (+ 2 indent) (lblify (car exps)) ": ")
+	 (schlep-maybe-bracketed-begin termin use (+ 2 indent) (cddr exps))
+	 (out indent "}")
+	 (rem-label (car exps)))
+	(else
+	 (out CONTLINE "{")
+	 (outletbindings (+ 2 indent) (car exps) #t)
+	 (schlep-body termin use (+ 2 indent) (cdr exps))
+	 (out indent "}"))))
+
+(define (schlep-maybe-bracketed-begin termin use indent exps)
+;;;  (print 'has-defines? exps)
+;;;  (print '==> (has-defines? exps))
+  (cond ((has-defines? exps)
+	 (out indent)
+	 (schlep-bracketed-begin termin use indent exps))
+	(else
+	 (schlep-body termin use indent exps))))
+
+(define (schlep-let* termin use indent exps)
+  (out CONTLINE "{")
+  (outbindings (+ 2 indent) (car exps))
+  (schlep-body termin use (+ 2 indent) (cdr exps))
+  (out indent "}"))
+
+(define (schlep-do termin use indent exps)
+  (if (and (not (eq? RETURN termin)) (not (eq? use VOID)))
+      (report "DO value not at top level" exps))
+  (out CONTLINE "{")
+  (outletbindings (+ 2 indent)
+		  (map (lambda (b) (list (car b) (cadr b))) (car exps))
+		  #t)
+  (out (+ 2 indent) "while (")
+  (schlep-test (+ 3 indent) (list 'NOT (caadr exps)))
+  (out CONTLINE ") {")
+  (schlep-body SEMI VOID (+ 4 indent) (cddr exps))
+  (cond ((not (null? (car exps)))
+	 (out (+ 4 indent) "{")
+	 (outletbindings
+	  (+ 6 indent)
+	  (filter (lambda (l) l)
+		  (map (lambda (b)
+			 (and (= 3 (length b)) (list (car b) (caddr b))))
+		       (car exps)))
+	  #f)
+	 (out (+ 4 indent) "}")))
+  (out (+ 2 indent) "}")
+  (schlep-body termin use (+ 2 indent) (cdadr exps))
+  (out indent "}"))
+
+;Csharp's case statment is dumb.
+;We translate case to equivalent if's.
+(define (schlep-case termin use indent exps)
+  (define caseval (string-append "caseVal" (number->string indent)))
+  #+f
+  (if (and (not (eq? RETURN termin)) (not (eq? use VOID)))
+      (report "CASE value not at top level" exps))
+  (out CONTLINE "{")
+  (out (+ indent 2) "int " caseVal " = ")
+  (schlep-exp SEMI VAL (+ 10 indent) (car exps))
+  (let ((first-if #t)) ;first-if represents the first if clause (the first case option)
+    (for-each
+     (lambda (x)
+       (case (car x)
+	 ((ELSE) (out indent "else "))
+	 (else
+	  (begin
+	    (if first-if (begin (out (+ indent 2) "") (set! first-if #f)) (out (+ indent 2) "else "))
+	    (let ((first #t)) ;In case of fall through, first represents the first time the control falls through.
+	      (for-each (lambda (d)
+			  (begin
+			    (if first (begin (out CONTLINE "if ((") (set! first #f)) (out CONTLINE "|| ("))
+			    (cond
+			     ((not (pair? d))
+			      (if (char? d)
+				  (out CONTLINE "'" (schlep-char d) "'")
+				  (out CONTLINE  d )))
+			     ((eq? 'UNQUOTE (car d))
+			      (schlep-exp NONE VAL CONTLINE (cadr d))))
+			    (out CONTLINE " == " caseVal ")" )))
+			(car x)))
+	    (out CONTLINE ")"))))
+       (out CONTLINE "{")
+       (schlep-body termin use (+ 4 indent) (cdr x))
+       ;;(if (eq? RETURN termin) (if (eq? use VOID) (out (+ 4 indent) "return;")))
+       (out (+ 2 indent) "}"))
+     (cdr exps)))
+  (out indent "}"))
+
+
+(define (add-label name call? arglist)
+  (set! *label-list* (cons (cons name (cons call? arglist)) *label-list*)))
+
+(define (label-vars name)
+  (let ((p (label? name)))
+    (and p (cddr p))))
+
+(define (rem-label name)
+  (set! *label-list* (cdr *label-list*)))
+
+(define (label? name) (assq name *label-list*))
+
+(define (called-label? name)
+  (define pr (assq name *label-list*))
+  (and pr (cadr pr)))
+
+(define (long-string? str)
+  (and (string? str) (> (string-length str) 40)))
+
+(define (infix-schlep-exp use op indent exps)
+  (define extra-nl? (and (string? op) (string-index op #\nl)))
+  (define cnt 0)
+  (define (par x indent)
+    (cond ((or (pair? x) (symbol? x))
+	   (out CONTLINE "(")
+	   (schlep-exp NONE use (+ 1 indent) x)
+	   (out CONTLINE ")"))
+	  (else (schlep-exp NONE use indent x))))
+  (cond ((eqv? #\, op)
+	 (out CONTLINE "(")
+	 (cond ((not (null? exps))
+		(cond ((long-string? (car exps))
+		       (set! op ",\n\t")
+		       (set! extra-nl? #t)))
+		(schlep-exp NONE use indent (car exps))
+		(set! exps (cdr exps))))
+	 (careful-for-each
+	  (lambda (x)
+	    (cond ((long-string? x) (set! op ",\n\t") (set! extra-nl? #t)))
+	    (cond (extra-nl? (set! *output-line* (+ 1 *output-line*))))
+	    (out CONTLINE op #\space)
+	    (schlep-exp NONE use indent x))
+	  exps)
+	 (out CONTLINE ")"))
+	(else
+	 (cond ((not (null? exps))
+		(par (car exps) indent)
+		(set! exps (cdr exps))))
+	 (careful-for-each
+	  (lambda (x)
+	    (set! cnt (+ 1 cnt))
+	    (out (if (or (and (string? op) (char=? #\space (string-ref op 0)))
+			 (zero? (modulo cnt 8)))
+		     (+ -1 indent)
+		     CONTLINE)
+		 op)
+	    (cond (extra-nl? (set! *output-line* (+ 1 *output-line*))))
+	    ;;(report 'infix-schlep-exp "newline in op" x)
+	    (par x (+ (if (char? op) 1 (+ -1 (string-length op))) indent)))
+	  exps))))
+
+(define (infix-test-schlep-exp op indent exps)
+  (define cnt 0)
+  (cond ((not (null? exps))
+	 (schlep-test indent (car exps))
+	 (set! exps (cdr exps))))
+  (careful-for-each
+   (lambda (x)
+     (set! cnt (+ 1 cnt))
+     (out (+ -1 indent) op)
+     (schlep-test (+ (if (char? op) 1 (+ -1 (string-length op))) indent) x))
+   exps))
+
+(define (%len str)
+  (define len (string-length str))
+  (do ((idx 1 (+ 1 idx)))
+      ((or (string-index "bBdiouxXfeEgGkKcsa" (string-ref str idx))
+	   (>= idx len))
+       (if (or (>= idx len) (eqv? #\% (string-ref str idx)))
+	   len
+	   (+ 1 idx)))))
+
+(define (jprint fstr args)
+  (define i 0)
+  (define cstr '())
+  (do ((flen (string-length fstr) (string-length fstr))
+       (%start (substring? "%" fstr) (substring? "%" fstr)))
+      ((not %start)
+       (reverse (cons fstr cstr)))
+    (cond
+     ((eqv? %start (substring? "%%" fstr))
+      (set! cstr (cons (substring fstr 0 (+ 1 %start)) cstr))
+      (set! fstr (substring fstr (+ 2 %start) flen)))
+     (else
+      (set! cstr (cons (car args)
+		       (cons (substring fstr 0 %start) cstr)))
+      (set! fstr (substring fstr
+			    (+ %start (%len (substring fstr %start flen)))
+			    flen))
+      (set! args (cdr args))))))
+
+;;(trace-all "scm2cs")(untrace assoc-if)(set! *qp-width* 333)
+
+;;; Local Variables:
+;;; mode:scheme
+;;; End:
+(if *script* (exit (schlep.script (list-tail *argv* *optind*))))

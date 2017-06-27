@@ -1,0 +1,2537 @@
+\input texinfo @c -*-texinfo-*-
+@c %**start of header
+@setfilename wb.info
+@settitle wb
+@include version.txi
+@setchapternewpage on
+@c Choices for setchapternewpage are {on,off,odd}.
+@syncodeindex vr fn
+@paragraphindent 0
+@c %**end of header
+
+@copying
+@noindent
+This manual documents the WB B-tree implementation, version
+@value{WBVERSION} released @value{WBDATE}.
+
+@noindent
+Copyright @copyright{} 1992-2000, 2003, 2007 Free Software Foundation, Inc.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.  A
+copy of the license is included in the section entitled ``GNU Free
+Documentation License.''
+@end quotation
+@end copying
+
+@dircategory Database
+@direntry
+* WB: (wb).           B-tree database implementation.
+@end direntry
+
+@iftex
+@finalout
+@c DL: lose the egregious vertical whitespace, esp. around examples
+@c but paras in @defun-like things don't have parindent
+@parskip 4pt plus 1pt
+@end iftex
+
+@titlepage
+@title WB
+@subtitle B-tree Implementation
+@subtitle Version @value{WBVERSION}
+@author Roland Zito-Wolf and Aubrey Jaffer
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top, Overview, (dir), (dir)
+@top WB
+
+@insertcopying
+
+@menu
+* Overview::                    
+* Theory::                      
+* C Interface::                 
+* Java Interface::              
+* C# Interface::                
+* SCM Interface::               
+* SCM Relational Databases::    
+* Procedure and Macro and Variable Index::  
+* Concept Index::               
+@end menu
+@end ifnottex
+
+@node Overview, Theory, Top, Top
+@chapter Overview
+
+@menu
+* Description::                 
+* History::                     
+* File Organization::           
+* Installation::                
+* Building from Scheme Sources::  
+* License::                     
+* GNU Free Documentation License::  
+@end menu
+
+
+@node Description, History, Overview, Overview
+@section Description
+
+@noindent
+@cindex WB
+@cindex associative
+@dfn{WB} is a disk based (sorted) associative-array package providing
+C, SCM, Java, and C# libraries.  These associative arrays consist of
+variable length (0.B to 255.B) keys and values.  Functions are
+provided to:
+
+@itemize @bullet
+@item
+create, destroy, open and close disk-files and associative arrays;
+@item
+insert, delete, retrieve, find next, and find previous (with respect to
+dictionary order of keys); and
+@item
+The atomic @samp{put} and @samp{rem} operations allow associations to be
+used for process mutexs.
+@item
+apply functions, delete, or modify values over a range of consecutive
+key values.
+@end itemize
+
+The (database) disk files interoperate between the various language
+libraries.  The interface to the SCM Scheme implementation supports
+longer data values and SLIB relational databases.  WB, SCM, and SLIB
+are packages of the GNU project.
+
+The WB implementation has a file size limit of 2^32 * block size
+(default 2048.B) = 2^43 bytes (8796.GB).  WB routinely runs with
+databases of several hundred Megabytes.  WB does its own memory and
+disk management and maintains a RAM cache of recently used blocks.
+
+Multiple associative arrays can reside in one disk file.  Simultaneous
+access to multiple disk files is supported.  A structure checking and
+garbage collecting program and a viewer are provided.  Compiled, WB
+occupies approximately 66 kilobytes.
+
+@cindex B-tree
+WB is implemented using a variant of B-tree structure.  B-trees give
+slower access than hashing but are dynamic and provide an efficient
+determination of successor and predecessor keys.  All operations are
+O(log(n)) in the size of the database.  B-trees are commonly used by
+database systems for implementing index structures.  B-trees are
+optimized for using the minimum number of disk operations for large data
+structures.  Prefix and suffix key compression are used for storage
+efficiency in WB.
+
+
+@node History, File Organization, Description, Overview
+@section History
+
+The origination of B-trees is credited to [BM72] R. Bayer and
+E. McCreight in 1972.
+
+Working at Holland Mark Martin between 1991 and 1993,
+Roland Zito-Wolf, Jonathan Finger, and I (Aubrey Jaffer) wrote the
+@dfn{Wanna B-tree} system.
+
+Jonathan Finger wrote a MUMPS-like byte-coded interpreter @dfn{Sliced
+Bread} using WB.  The integrated system was heavily used by Holland Mark
+Martin for the rest of the decade.
+
+In 1994 I wrote a Scheme implementation of the relational model with
+an independent object-oriented base-table layer for SLIB:
+
+@center @url{http://people.csail.mit.edu/jaffer/slib_6.html}
+
+In 1996 Holland Mark Martin assigned the copyriht for WB to the Free
+Software Foundation.  I released WB as a library for C and SCM.  I
+also wrote @file{wbtab.scm}, a base-table interface enabling SLIB's
+relational database to be backed by WB.
+
+@c I used WB databases to back some web applications, reading HTTP
+@c requests and generating HTML.
+
+In 2002 I added color dictionary relational databases to SLIB.
+
+In 2003 I added @dfn{next} and @dfn{previous} operations to the SLIB
+relational package, and wrote @file{rwb-isam.scm} for WB.
+
+In 2004 I wrote FreeSnell, a program to compute optical properties of
+multilayer thin-film coatings.  At the core of FreeSnell is a rwb-isam
+spectral refractive-index database for over 300 materials.
+
+In 2006 I decided to reimplement ClearMethods' Water language on top
+of WB.  In 2007, in order to make Water available on the great
+majority of browsers and servers, Ravi Gorrepati adapted Schlep (the
+SCM to C translator) to make translators to Java and C#.  He also
+ported the support files and test programs to Java and C#.
+
+I continue to maintain WB.
+The most recent information about WB can be found on WB's @dfn{WWW}
+home page:
+
+@center @url{http://people.csail.mit.edu/jaffer/WB}
+
+
+@node File Organization, Installation, History, Overview
+@section File Organization
+
+The source files for WB are written in the SCM dialect of Scheme:
+
+@table @file
+@item wbdefs.scm
+SCM configuration definitions.
+@item segs.scm
+@itemx handle.scm
+@itemx blink.scm
+@itemx prev.scm
+@itemx del.scm
+@itemx ents.scm
+@itemx scan.scm
+@itemx stats.scm
+SCM code for WB-trees.
+@item blkio.scm
+wimpy POSIX interface to the disk.  Replace this if you have a more
+direct interface to the disk.
+@end table
+
+@cindex scm2c
+@cindex scm2cs
+@cindex scm2java
+These files are translated into the C, C#, and Java targets by SCM
+scripts named @dfn{scm2c}, @dfn{scm2cs}, and @dfn{scm2java}
+respectively.  The function and variable data types in the target
+languages are determined by pattern-matching the first-element strings
+in the associations @dfn{scm2c.typ}, @dfn{scm2cs.typ}, and
+@dfn{scm2java.typ} respectively.
+
+Files translated to C are put into the @file{wb/} directory.
+Files translated to Java are put into the @file{wb/java/} directory.
+Files translated to C# are concatenated with @file{wb/csharp/Cssys.cs}
+and @file{wb/csharp/SchlepRT.cs} and written to @file{wb/csharp/Wb.cs}.
+
+In the @file{Makefile}:
+@table @samp
+@item s2hfiles
+Derived *.h files for C.
+@item s2cfiles
+Derived *.c files for C.
+@item s2jfiles
+Derived java/*.java files for Java.
+@item csharp/Wb.cs
+Single derived source file for C#.
+@end table
+
+WB comes with a C utility program for database files stored on disk.
+
+@deffn Program wbcheck path
+Checks the structure of the database named by @var{path} and reclaims
+temporary trees to the freelist.
+@end deffn
+
+@subheading Manifest
+
+@table @file
+
+@item wb.info
+documents the theory, data formats, and algorithms; the C and SCM
+interfaces to WB-tree.
+@item ChangeLog
+documents changes to the WB.
+@item example.scm
+example program using WB-tree in SCM.
+
+@item wbsys.h
+@cindex wbsys.h
+The primary C include file for using the WB layer is is @file{wbsys.h},
+which includes several other files from the directory.  @file{wbsys.h}
+also defines WB's internal data types.
+@item wbsys.c
+Shared data and low-level C accessors.
+@item wbsys.scm
+Shared data and low-level accessors for debugging in SCM.
+@item wbscm.c
+C code for the SCM interface to WB-trees.
+@item db.scm
+code for SCM interface when debugging in SCM.
+@item scm2c.scm
+SCM code which translates SCM code into C.
+@item scm2c.typ
+rules relating variable names to types in generated C.
+@item scm2cs.scm
+SCM code which translates SCM code into C#.
+@item scm2cs.typ
+rules relating variable names to types in generated C#.
+@item scm2java.scm
+SCM code which translates SCM code into Java.
+@item scm2java.typ
+rules relating variable names to types in generated Java.
+@item test.scm
+file for testing WB-tree system.
+@item test2.scm
+more tests for WB-tree system.
+@item Makefile
+Unix makefile
+@item VMSBUILD.COM
+command script for compiling under VMS.
+@item all.scm
+loads all the SCM files for debugging.
+@item wbtab.scm
+SCM code allowing WB to implement SLIB relational databases.
+@item rwb-isam.scm
+SCM code allowing WB to implement SLIB relational databases with
+numerical and lexicographic key collations.
+@item wbcheck.c
+program for checking, repairing, and garbage collecting WB-tree
+databases.
+@item wbview
+SCM script for displaying low-level WB database associations.
+
+@end table
+
+
+@node Installation, Building from Scheme Sources, File Organization, Overview
+@section Installation
+
+@ifset html
+<A NAME="Installation">
+@end ifset
+@ifset html
+</A>
+@end ifset
+
+@cindex wb
+WB unpacks into a directory called @samp{wb}.
+
+If you plan to use WB with SCM, the directories @file{scm} and
+@file{wb} should be in the same directory.  Doing @samp{make wbscm.so}
+in the scm directory compiles a dynamically linkable object file from
+the WB C source.  Including the @samp{-F wb} option to an executable
+build compiles the WB interface into the executable.  It is not
+necessary to compile anything in @file{wb} directory.
+
+@c @cindex VMS
+@c On VMS systems, the @file{VMSBUILD.COM} script will build wbcheck and db
+@c (SCM).
+
+@c For unix:
+
+@table @code
+@item make all
+Compiles @file{libwb}, @file{wbscm.so}, @file{java/wb.jar},
+@file{csharp/Wb.dll} and the @file{wbcheck} executable.
+@item make install
+Installs @file{libwb}, @file{wbscm.so}, @file{java/wb.jar}, and
+@file{wbcheck} in the @code{$(prefix)} tree, as assigned in the
+@file{Makefile}.
+@end table
+
+
+@node Building from Scheme Sources, License, Installation, Overview
+@section Building from Scheme Sources
+
+@subheading Scheme Infrastructure
+
+SCM source is available from:
+@url{http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2.zip}
+
+Also available as source RPM:
+@url{http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2-1.src.rpm}
+
+SLIB is a portable Scheme library which SCM uses:
+@url{http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b1.zip}
+
+Also available as RPM:
+@url{http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b1-1.noarch.rpm}
+
+@subheading Testing Scheme Source
+
+From the wb directory, do @samp{scm all test}.  This will load the
+Scheme version of WB-tree with test code.  Typing @samp{(main)} will
+construct a test database @file{z} in this directory.  If this runs
+without errors then you are ready to build the C code.  Exit from scm
+with @samp{(quit)}.
+
+@subheading Regenerating C Sources.
+
+@example
+make all
+@end example
+
+@c If your C compiler does not accept ANSI function prototypes, comment out
+@c the line @samp{(set! __STDC__ #t)} in @file{make.scm}.
+
+@c The command @samp{scm -lmake.scm} will translate all the appropriate SCM
+@c files.
+
+@c Do @samp{make} or @samp{@@VMSBUILD} to compile wb and the auxiliary
+@c program @file{wbcheck}.
+
+@subheading Testing Compiled DBSCM
+
+Run @samp{scm -rwb -ltest}.  This should build the test database
+@file{z} much more quickly than before.
+
+Type @samp{(quit)} to exit from DBSCM.  Now run @samp{./wbcheck z}.
+This will check the structure of the database and collect temporary
+files.  This should reclaim 52 blocks and report no errors.  If you run
+it again, no blocks will be collected.
+
+
+@node License, GNU Free Documentation License, Building from Scheme Sources, Overview
+@section License
+@center Copyright (C) 1991, 1992, 1993, 1996, 1999, 2000, 2003, 2007, 2008
+@center Free Software Foundation, Inc.
+@center 59 Temple Place, Suite 330, Boston, MA 02111, USA
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this program.  If not, see
+<http://www.gnu.org/licenses/>.
+
+
+@node GNU Free Documentation License,  , License, Overview
+@section GNU Free Documentation License
+
+@include fdl.texi
+
+
+@node Theory, C Interface, Overview, Top
+@chapter Theory
+
+We used [SAGIV] as our starting point for concurrent b-tree algorithms.
+However, we made significant changes and (we feel) improvements.  We
+have particularly tried to simplify the algorithms to reduce the
+implementation and especially debugging effort.  There are also a lot of
+complex details involved in building a complete implementation.  The
+goal of this document is to describe and explain the major design
+decisions and any subtleties that arose.
+
+@menu
+* B-tree Structure and Access::  
+* Concurrency::                 
+* Buffer I/O and Free-List Management::  
+* Error Handling::              
+* Longer Value Fields::         
+* Unlimited Length Keys and Values::  
+* To Be Done::                  
+* Miscellany::                  
+@end menu
+
+@node B-tree Structure and Access, Concurrency, Theory, Theory
+@section B-tree Structure and Access
+
+
+@menu
+* Definitions::                 
+* Block Format::                
+* Tree format::                 
+* Split keys::                  
+* Insertion method::            
+* Deletion::                    
+* Non-delete of last block in the chain::  
+* Prev::                        
+* Root Block protocol::         
+* Other tree organizations::    
+@end menu
+
+@node Definitions, Block Format, B-tree Structure and Access, B-tree Structure and Access
+@subsection Definitions
+
+
+@subsubheading B+-tree
+@cindex B+-tree
+
+@itemize @bullet
+@item
+is a structure of blocks linked by pointers
+
+@item
+is anchored by a special block called the root, and bounded by leaves
+
+@item
+has a unique path to each leaf, and all paths are equal length
+
+@item
+stores keys only at leaves, and stores reference values in other,
+internal, blocks
+
+@item
+guides key search, via the reference values, from the root to the leaves
+@end itemize
+
+@subsubheading block
+@cindex block
+
+@itemize @bullet
+@item
+is either internal or a leaf, including the root block
+
+@item
+contains at most n entries and one extra pointer for some fixed n
+
+@item
+has no fewer than [n/2] entries, the root excepted
+@end itemize
+
+@subsubheading root block
+@cindex root block
+
+@itemize @bullet
+@item
+is a leaf when it is the only block in the tree and will then contain at
+least one entry
+
+@item
+must have at least 2 pointers to other blocks when it is internal
+@end itemize
+
+@subsubheading internal block
+@cindex internal block
+
+@itemize @bullet
+@item
+contains entries consisting of a reference value and a pointer towards
+the leaves
+
+@item
+its entries point to data classified as greater than or equal to the
+corresponding reference value
+
+@item
+its extra pointer references data classified as less than the block's
+smallest reference value
+@end itemize
+
+@subsubheading leaf block
+@cindex leaf block
+
+@itemize @bullet
+@item
+contains entries consisting of a key value and a pointer to the storage
+location of data matching the key
+
+@item
+its extra pointer references the next leaf block in the tree ordering;
+leaves linked in this manner are neighbors
+@end itemize
+
+@subsubheading prefix compression
+@cindex prefix compression
+
+Instead of storing the full text of each key, store the length of match
+with the previous key (in this block) and the text of the key which
+doesn't match.
+
+@subsubheading suffix compression
+@cindex suffix compression
+
+In non-leaf blocks, only store enough of the split-key to differentiate
+the two sequential blocks at the lower level.
+
+@node Block Format, Tree format, Definitions, B-tree Structure and Access
+@subsection Block Format
+
+@noindent
+The first 20 bytes of the block header format is the same for all
+types of blocks.
+
+@table @t
+@item  0  blk:id
+The ID of this block.
+@item  4  blk:top-id
+The ID of the root block of this tree.
+@item  8  blk:nxt-id
+The ID of the next block in the chain (at same level as this one).
+@item 12  blk:time
+The 32-bit time/date when this block was last modified.
+@item 16  blk:end
+Two-byte length of data in block, including header.
+@item 18  blk:level
+Block level; 0 is leaf.
+@item 19  blk:typ
+Block type, one of:
+
+@itemize @bullet
+@item @t{dir-typ } Directory tree.
+@item @t{ind-typ } Other tree.
+@item @t{seq-typ } Sequential chain (unused).
+@item @t{frl-typ } Free-list chain.
+@end itemize
+@item 20
+Start of data for @t{SEQ-TYP} blocks.  Data spans to @t{blk:end}.
+@item 20  leaf-split-key
+@item 22
+Start of data for other block types.  Data spans to @t{blk:end}.
+@end table
+
+
+
+@node Tree format, Split keys, Block Format, B-tree Structure and Access
+@subsection Tree format
+
+@subheading The WB-tree (the "Wanna B-tree")
+
+We use the B-link tree format (see [SAGIV]).  Each leaf block contains
+some number of (key,value) pairs; each non-leaf (ie. index) block
+contains (key, down-pointer) pairs.  Each block contains one additional
+key value, the SPLIT key, that is strictly greater than any other key in
+the block.  The tree is augmented by chaining together the nodes of each
+level of the tree in split-key order (the NEXT pointers).
+
+We allow the tree to be missing any index-insertion or block-deletion
+updates so long as certain key-order invariants are maintained:
+
+@table @asis
+@item A
+Blocks are chained in order of increasing split key at each level,
+and all valid blocks appear in the chain.
+
+@item B
+Split keys are unique at each level.
+
+@item C
+Every DOWN pointer from level N+1 points to a block B at the next lower
+level N whose split-key S is less than or equal to the key S1 associated
+with the pointer.
+
+@table @asis
+@item C1
+If the split key for block B (at level N) is strictly less than the key
+associated with the ptr from level N+1 (S < S1), then it must be the
+case that
+
+@enumerate a
+@item
+a block B' with that split key S1 exists at level N;
+@item
+B' is reachable from B by following NEXT pointers; and
+@item
+no pointers to either B' nor any blocks between B and B' exist in level
+N+1.  We call the subchain from B through B' the SPAN of the (key,ptr)
+entry (split(B'),B).
+
+@end enumerate
+
+@item C2
+It is invalid for a down pointer to contain a key not present as a split
+key at the next level.
+
+Note that a key in an index must match its block's split key exactly; if
+a key K is less than the split-key S of the block B it points to,
+searches for intervening keys will be misdirected (to the next block);
+and if K is greater than S, then splits of the block after B at key
+values K' where S<K'<K will be mis-inserted in B's paren, because K'
+should logically go AFTER K, but K'<K.
+
+The notion of the span of an index entry is useful.  We note that each
+block split can be thought of as an EXTENSION of some span at the
+next-higher level, while each PARENT-INSERT-UPDATE can be thought of as
+a corresponding span REDUCTION.  A span that has only one block in it
+will be called FULLY REDUCED; a b-tree is fully reduced when all its
+spans are fully reduced, meaning that all pending/deferred
+insert-updates have been performed.  Lastly, we can express rule C1 more
+succinctly in terms of spans:
+
+@table @asis
+@item C,C2
+SPANs must be well-formed (span must be closed; keys must match exactly)
+
+@item C1
+The SPANS of the entries at any index must not overlap.
+@end table
+
+@end table
+@end table
+
+@subheading Key/Value Order; Uniform Leaf/Node Format
+
+We originally had index nodes in (value,key) order because it made
+insertions simple, but abandoned that because it made all the
+insertion/deletion propagation code special-case.  In fact, because of
+the asymmetry of INSERT and DELETE, either one or the other will
+require that a single operation sometimes modify two blocks
+(@pxref{Insertion method}).  However, using (key,value) ordering at
+all levels of the tree simplified the code considerably.
+
+@node Split keys, Insertion method, Tree format, B-tree Structure and Access
+@subsection Split keys
+
+@cindex split-key
+Split keys seem to be an accepted method for B-tree organization.
+@cindex Blink
+@cindex B-link
+@cindex Blink-tree
+@cindex B-link-tree
+In a Blink-tree, where one might potentially have to chain forward to
+find a desired key, the split key allows one to determine when the
+search can be terminated.  Having the split key at the @emph{end} of
+the block saves one block access per search.  (If the split key were
+at the front of the block, one would have to access the next block in
+the chain to determine that a search could terminate.)
+
+@subsubheading Last-key values
+
+It is useful to define a @dfn{largest key} to be the split key of the
+last block at any given level; the code is made more complex if the
+last key is some special value (eg. the null string) that doesn't
+follow lexicographic order, not to mention the problems that arise
+with inserting into empty (last) blocks.  We've reserved the set of
+strings starting with @samp{0xff} as split keys only; they cannot be
+used as real key values.  Last-key values are of the form xFF<level>.
+This makes the last key in level N+1 strictly larger than any in level
+N, so the end-of-chain key for level N need not be treated specially
+when it is inserted as a key at level N+1.
+
+@subsubheading Fixed split keys/Independence of levels
+
+We make the split keys at index levels act like those at the leaf
+level, that is, the split key in a block @emph{NEVER CHANGES}.  The
+advantage is that inserts and deletes cannot cause split-key changes,
+avoiding the need for code to propagate these changes, which are a
+pain to test.  It also makes the levels genuinely independent, a
+useful conceptual simplification.
+
+The disadvantage is that this introduces a @dfn{dead zone} between the
+last key-value pair of an index block and its split key.  This
+complicates the code slightly, and makes the average search path
+slightly longer than log(N) (by a constant factor of 1+(1/BF), where
+BF is the branching factor of the tree).  More annoyingly, it
+interacts with insertions for block splits (see INSERTION).
+
+@node Insertion method, Deletion, Split keys, B-tree Structure and Access
+@subsection Insertion method
+
+Insertion in a index needs to appear atomic so that the key-order
+invariant is maintained.  Since we are using key/value-ordered index
+blocks, parent-update insertion has a special extra step: we insert
+the new key and pointer in index block B, then swap value fields with
+the next entry in sequence.  Unfortunately, when the insertion is the
+end of the block, the next entry is in the next block B', so two
+blocks must be modified.  (The advantage of value/key ordering is that
+insertion never modifies more than one block; however, you get screwed
+in the code for deletions instead.) The code checks for this case and
+locks both blocks before proceeding.  (An alternate solution
+considered is to back up the split key of B so that the new key would
+go at the front of B', but that introduces other problems.)
+
+While the above method preserves correctness (even under concurrency),
+there is unfortunately a 2nd-order screw WHICH STILL NEEDS TO BE
+IMPLEMENTED: how to write the 2 blocks in an order that preserves
+correctness in case of disk crash.  If only B is written, the database
+will contain 2 pointers to the block whose split caused the insertion;
+if only B' is written, the pointer correctness will be violated.  (It
+would seem that this kind of problem is inherent to any operation that
+needs to maintain consistent changes across multiple blocks.)  The fix
+seems to be to surround the write with a notation in the root that
+says this special case is being exercised and indicates what blocks
+were being modified (B,B') and what the pointers should be:
+
+@itemize @bullet
+@item Write (B,B',down-ptrs) to Blk 0
+@item Write B'
+@item (Write new block if B was split by insert)
+@item Write B
+@item Remove flags from Blk 0 and write.
+@end itemize
+
+We elect to write out block B' first for consistency with the case
+where B' is a new block created by a block split.  The screw case will
+create a damaged DB, but the danger of deleting a doubly-pointed-at
+block is avoided.  This is adequate information to recover directly.
+(JONATHAN?)
+
+(Other alternatives were considered.  Backing up the split key at next
+level allows a subsequent insertion to be atomic, but the backing-up
+operation has the same two-block consistency problem in keeping ITS
+parent index consistent.  If the parent key isn't backed up, subsequent
+splits of the following block will result in incorrect updates at the
+next level.)
+
+@node Deletion, Non-delete of last block in the chain, Insertion method, B-tree Structure and Access
+@subsection Deletion
+
+Deleting can be divided into two parts: the block to be deleted must
+be unlinked from both parent and predecessor, after which the block
+can be reclaimed.
+
+@subsubheading Unlinking the block
+
+At the moment, we've decided to simplify the delete operation by
+requiring that both the parent and the previous block be available for
+modification, else the deletion fails (is deferred).  This makes block
+deletion an atomic change, which avoids several problems introduced by
+permitting partial deletions (see CONCURRENCY).
+
+Alternatives: [WANG] gives a clever way to do deletion w/o PREV, by
+swapping blocks.  This seemed too hard to make bulletproof for
+concurrency so we stuck with the PREV method, which after all only
+does extra block accesses 1/BF of the time.
+
+@subsubheading Crashes during DELETE
+
+What about the order for writing the parent and predecessor
+blocks in a delete?  We elect to write out the PARENT block first, so
+that if the system should crash the chain will still be intact.  The
+block that we were trying to delete will still be in the chain, but it
+cannot be used, it is "dead."
+@ref{Deferred Index Updates and concurrency} discusses how to deal with
+"dead" blocks.
+
+@subsubheading Reclaiming the block
+
+One major change from [SAGIV] is that SAGIV assumed multiple copies
+of a block could exist, which makes reclaiming deleted blocks complex
+(he suggests a timeout-based protocol).  We opted instead to track how
+many pointers to each block are extant by adding a lock for that
+purpose, the NAME lock (essentially, a DELETE lock).  A routine must get
+NAME lock on a pointer BEFORE releasing READ/WRITE on the block from
+which the pointer is obtained.  (SAGIV's method is almost certainly more
+efficient in the sense that our method incurs overhead on every
+operation as opposed to just on the problem case of a READ request
+during a WRITE; several empirical studies of such tradeoffs support this
+conclusion.) On the other hand, NAME lock is useful for other things,
+such as insuring that the block you are PREVing from can't be deleted
+while you're looking for its parent or predecessor @dots{}
+
+@subsubheading Non-symmetry of INSERT and DELETE
+
+It is worth remembering that INSERT and DELETE are not symmetric, in the
+sense that a postponed insertion is NOT equivalent to deleting a
+(KEY,PTR) pair.  The latter operation leaves a block whose pointer is
+missing unaccessible via the index, while the former leaves the block
+accessible through the NEXT pointer chain.
+
+This asymmetry has been the death of more proposals for fixing various
+problems involving concurrency than I care to recall!
+
+EXAMPLE:
+
+@enumerate 1
+@item
+Start with blk p with split key k at level n;
+
+@itemize @bullet
+@item
+the index (level n+1) contains: @dots{}k,p, @dots{}
+@end itemize
+
+@item
+split p at k', adding block p';
+
+@itemize @bullet
+@item
+the index should now contain @dots{}k',p,k,p', @dots{}
+@end itemize
+
+@item
+Now neither deleting p nor p' yields the original index contents:
+
+@itemize @bullet
+@item
+If we delete p, the result is @dots{}k,p', @dots{}
+@item 
+If we delete p', the result is @dots{}k',p, @dots{}
+
+@end itemize
+@end enumerate
+
+Therefore, it is not possible for a subsequent delete to "cancel"
+an insert; the deletes must either wait for the relevant inserts
+to complete or else do special work to maintain correctness.
+
+@node Non-delete of last block in the chain, Prev, Deletion, B-tree Structure and Access
+@subsection Non-delete of last block in the chain
+
+We currently do not support deletion of the last block at any level,
+that is, the one with the end-of-block key.  This is because this
+deletion requires special case to retain the end-of-block key.  One way
+to achieve this is to copy forward the contents of the next-to-last
+block, and deleting that instead.  [There are details to be worked out,
+eg. preservation of correctness during this operation.]
+
+@node Prev, Root Block protocol, Non-delete of last block in the chain, B-tree Structure and Access
+@subsection Prev
+
+[DESCRIBE HOW IT WORKS]
+
+SCREW CASE FIX UNDERSTOOD BUT NOT YET IMPLEMENTED: if down-pointers are
+missing to blocks immediately after the first block of a level, PREV
+will miss those blocks.  The problem occurs when a PREV-BLOCK of block B
+at level N occurs, causing a PREV at level N+1.  If down-pointers are
+missing, the block B' associated with B's split key may be some
+predecessor of B rather than B itself.  In this case PREVing at level N+1
+is wasteful but correct; it would require fewer block accesses to chain
+from B' than from PREV of that entry.  However, if the B' entry is the
+FIRST at level N+1, PREV will erroneously conclude that it is at the
+start of the chain.  It either has to (a) always look at B's entry at
+level N+1 to check that the current block's ptr is really up-to-date, or
+ (b) just check when it hits the START-OF-CHAIN.
+
+@node Root Block protocol, Other tree organizations, Prev, B-tree Structure and Access
+@subsection Root Block protocol
+
+@subsubheading Root uniqueness
+
+We guarantee that the root block number never changes and thus can be
+used as a unique identifier for a given WB-tree.  Other systems provide
+a unique tree ID by introducing a level of indirection in root
+references; this is inefficient, as root references are frequent.  When
+the root is split, we allocate a new block to hold the data that would
+have remained in the root block, then use the old root block for the
+new root.  This does mean that one cannot depend on a block's ID being
+unchanged if it splits!
+
+@subsubheading ROOT DELETE and Reducing number of levels in a tree
+NOT IMPLEMENTED.
+
+@node Other tree organizations,  , Root Block protocol, B-tree Structure and Access
+@subsection Other tree organizations
+
+There are other possibilities for tree layouts.  It is possible that
+some of these may simplify operations that in the current layout are
+complex, such as the insert-screw-case.  Other possible choices include:
+
+@itemize @bullet
+@item
+split key at start rather than the end of the block;
+@item
+reversing the order of (key,value) pairs in the blocks;
+@item
+not using the split key
+@item
+using TWO split keys (one at each end of the block);
+@item
+running the chains backward rather than forward;
+@end itemize
+
+My (RJZ's) favorite alternate assumption is allowing multiple versions
+of blocks to exist, as in [SAGIV].  This would mean:
+
+@itemize @bullet
+@item
+processes would be allowed to maintain STATE in a block, such as current
+position, such as for successive NEXTs; on the other hand, NEXT would
+have to check for NEXT(X)<X and skip forward accordingly.
+@item
+Write/Read interlock overhead should be greatly reduced (as WRITEs do
+not have to wait for reads);
+@item
+the need for NAME locking is greatly reduced, since we no longer would
+be trying to count the processes that "know" about each block;
+@item
+reclaiming deleted blocks is harder;
+@item
+other issues to be evaluated: effect on rebalance, PREV, and the
+deferred-operation protocol we've developed.
+@end itemize
+
+Perhaps we can explore the interrelationships in some methodical way
+someday @dots{}
+
+
+@node Concurrency, Buffer I/O and Free-List Management, B-tree Structure and Access, Theory
+@section Concurrency
+
+@menu
+* Name access (and deleted-block reclamation)::  
+* Fail-out protocol/access conflict strategy::  
+* Deferred Index Updates and concurrency::  
+@end menu
+
+@node Name access (and deleted-block reclamation), Fail-out protocol/access conflict strategy, Concurrency, Concurrency
+@subsection Name access (and deleted-block reclamation)
+
+In order to be able to explicitly know when a block is safe to delete,
+we insist that a user must get NAME lock on a pointer BEFORE releasing
+READ/WRITE on the block from which the pointer is obtained.  NAME lock
+is useful for other things, such as
+
+@itemize @bullet
+@item
+insuring that the block you are PREVing from can't be deleted while
+you're looking elsewhere;
+
+@item
+CHAIN-PUT uses it to insure that the block just split doesn't disappear
+during the call to PARENT-INSERT-UPDATE
+
+@item
+others?
+@end itemize
+
+
+@node Fail-out protocol/access conflict strategy, Deferred Index Updates and concurrency, Name access (and deleted-block reclamation), Concurrency
+@subsection Fail-out protocol/access conflict strategy
+
+Blocked operations are at the moment simply going to fail with an
+error code of RETRYERR, meaning that they can be safely retried later.
+The current idea is to use this whenever a READ-WRITE conflict occurs.
+(This would not be necessary using SAGIV's method.)  However, since
+various other lockout and wait conditions can occur -- waits for block
+reads, waits on NAME locks, waits on interlocked operations -- some
+such facility would be needed anyway, so it seems reasonable to try to
+use it to handle READ-WRITE blocking as well.
+
+NOT REALLY IMPLEMENTED YET due to the complexity of reorganizing the
+code to pass up the appropriate information in all cases.
+(Top-level routines return these codes but internal routines
+don't really use it yet, so retry-ability isn't really there yet.)
+
+@node Deferred Index Updates and concurrency,  , Fail-out protocol/access conflict strategy, Concurrency
+@subsection Deferred Index Updates and concurrency
+
+The basic strategy is to allow a key insert/delete that causes a block
+to split/become empty to complete, but to then queue up the
+parent-update/block delete on some process that will retry deferred
+updates in the background until they succeed.
+
+The problem is that deletes contain two separate operations that can
+wait: the parent update and the predecessor update.  The two updates
+can be done separately if the block is first marked "dead" so that no
+insertions into it can occur.  Unfortunately, there is a class of rare
+and complex screw cases involving the correct ordering of deletes and
+inserts that happen to involve the same key.  One might for example
+delete a block, deleting its key, and then subsequent splits can
+reintroduce and re-delete it.  If operations at the index level are
+deferred, the ordering of these deferred operations determines whether
+the resulting tree is correct.
+
+Making block-delete atomic (as defined above) greatly simplifies this
+process.  The block being inserted/deleted can then serve as its own
+semaphore.
+
+We have decided to adopt a lazy update strategy.  That is, rather than
+keeping around queues of pending parent-updates, we just throw them
+away if they can't be executed immediately.  We can get away with this
+because the updates for level N+1 can be reconstructed from the chain
+at level N.
+
+Now, a deferred update only affects performance if the affected path is
+actually encountered: if we find we have to chain across two blocks, it
+means a parent update hasn't occurred yet; if we encounter an empty
+block, it means a delete update hasn't occurred.  Our idea is to fix
+these "inefficiencies" on demand, that is, only when we run into one
+will we expend the effort to fix it.  For the moment, assume ALL block
+deletes and insert updates are deferred.
+
+The basic algorithm is:
+
+@enumerate a
+@item
+If we have to chain forward in searching for a key, there must be
+pointer missing at the next level (deferred insert).  So we attempt to
+insert it.  Forward chaining to reach the NEXT and PREV of a key
+is normal and hence shouldn't cause update attempts.
+
+@item
+Whenever we reach an empty block, we attempt to delete it, except
+for the case where we are doing an insert which should go in that
+block.  The delete attempt will fail UNLESS the relevant parent updates
+are complete, that is, if and only if the block is within a fully
+reduced span.
+@end enumerate
+
+One major concern has been that an I/O failure during a block delete
+can leave a "dead" block, that is, one which can't be reached from its
+parent level.  It is still in a chain but there is no down pointer to
+it and no search can terminate at that node.The problem is that once a
+block becomes dead we need to prevent it from being inserted into or
+restored into use, because that could result in entries being
+out-of-order (suppose that, while the block's dead, some inserts of
+keys less than its split key occur.  They'll be directed into the next
+block by the index, and be posted there.  If we then restore the block,
+the key ordering will be incorrect.)  But it turns out that we can
+prevent this by observing which B-tree operations can encounter which
+types of deferred-update situation, as follows:
+
+If we think of the tree as a set of nested SPANS, where the SPAN of an
+index entry is the set of entries in the blocks it SPANS, we note that
+during operations using search only - GET,PUT,REM -- the locus of
+search stays strictly within the SPAN of some entry in the root.  We
+enforce that a block not be deleted until its parent pointers are
+completely updates, that is, its pointer has a span of exactly one
+block.  Now suppose a block delete fails halfway, leaving a empty
+block without any parent pointer.  Such a block is unreachable by
+FIND-NODE and hence by INSERT!  This means that if INSERT encounters
+an empty block, it must be valid to insert into it.
+
+This has several interesting consequences:
+
+@enumerate a
+@item
+This means that only the operations that can possibly chain ACROSS
+spans have to worry about dead blocks: the NEXT and PREV operations.
+(What exactly is the effect on PREV?)
+
+@item
+This means that "dead" blocks can't be deleted (unless we look for
+them specially).  But they (a) are only created by a rare kind of
+event, and (b) won't hurt anything, so long as we arrange that NEXT
+and PREVs ignore the empty blocks (ie. ignore the value of their split
+keys).
+
+@item
+The way we have defined deferred-delete reconstruction, if the block
+isn't within a fully-reduced span, the delete simply can't succeed.
+This means that there is no point in trying to delete a blank block when
+we're chaining though a span, that is, we should only try to delete
+empty blocks encountered (1) when following a DOWN pointer in FIND-ENT,
+or (2) due to a NEXT operation (or PREV?).
+@end enumerate
+
+[Having realized this, we can actually let block-deletes be two-part
+operations (again).  The only additional complexity is that then we'd
+need to implement a method for detecting dead blocks, that is,
+differentiating them from empty blocks in the middle of large spans,
+which we mustn't try to delete.  We just check if the block is
+continued in some span! HOW TO DO THAT EFFICIENTLY?]
+
+In detail, the method of detecting deferred operations goes like this:
+
+@enumerate 1
+@item
+RECONSTRUCTING DEFERRED PARENT-UPDATES (missing DOWN pointers):
+
+Whenever we have to follow the NEXT pointer of a block B (in FIND-NODE), we
+should attempt a PARENT-INSERT-UPDATE using the (key,value) pair
+(split(B),next(B)).  FIND-NODE needs to be fixed to chain right rather
+than down when the "dead zone" is encountered; and it should not attempt a
+PARENT-INSERT-UPDATE in this case.
+
+PARENT-INSERT-UPDATE can fail if:
+
+@enumerate a
+@item
+some other process is already doing the update (the first one to
+lock the parent wins, the other will fail out);
+@item
+the key split(B) is already present (means a DELETE is pending --
+this shouldn't really occur, though);
+@item
+the update requires a block split but no blocks are available.
+@end enumerate
+
+@item
+RECONSTRUCTING DEFERRED BLOCK DELETES:
+
+Whenever we reach an empty block in FIND-NODE or a NEXT/PREV
+operation, we'll attempt a PARENT-DELETE-UPDATE.
+
+PARENT-DELETE-UPDATE should fail when
+
+@enumerate a
+@item
+the key is found but points to a different block (meaning the containing
+span isn't fully reduced);
+@item
+the block is NAME-locked (this means its safe to leave name-locks
+around, the worst that can happen is they cause block deletes to be
+deferred some);
+@item
+someone else is doing a PARENT-DELETE-UPDATE on this block (this can be
+guaranteed by having the delete process first name-lock the block being
+deleted;
+@item
+some block needing to be modified (parent or prev) is locked.
+@end enumerate
+
+@item
+We need to fix the code that does the NEXT-KEY operation to not stop at
+potentially-dead blocks.  CHAIN-FIND need NOT ignore blank blocks.
+
+In practice, we'll want to trigger the update routines at the normal
+times as well, ie. try insert-updates after block splits and
+delete-updates after a block becomes empty.
+
+There are a number of new statistics we should keep; these include:
+
+@itemize @bullet
+@item
+deferred PARENT-INSERT-UPDATEs (PUDs)
+@item
+insert-updates that succeed
+@item
+insert-updates that fail (measures overhead of the method)
+@item
+insert-update failure rate
+@end itemize
+
+@itemize @bullet
+deferred block deletes
+@item
+deferred block deletes that succeed
+@item
+deferred block deletes that fail (measures overhead of the method)
+@item
+delete failure rate
+@end itemize
+
+@itemize @bullet
+@item
+count of dead blocks found (requires extra work)
+@end itemize
+
+(The number of chain-forwards is also a measure of the overhead.)
+
+[Note: this mechanism also supports a simple queuing method: keep a list
+of the block numbers at which updates were deferred, and in times of low
+usage do FINDs to them, which will update them as a side-effect @dots{}]
+
+@end enumerate
+
+------------
+
+[Other strategies were considered but were either significantly more
+complex or over-heady, or introduced unnecessary delays:
+
+One hack is to serialize the queue of postponed index INSERT and DELETE
+operations by brute force: to do them in exactly the order they arrived
+in.  Possibly simpler alternative method: sort by key and timestamp them!
+
+I think we also decided that the interpreter could simply devote a
+process to each deferred operation, since we want to shift resources
+toward accomplishing the deferred operations if too many queue up.
+
+[WANG] maintains a queue of deleted operation on the DESTINATION block.
+This has the disadvantage that whenever a block is split or merged the
+deferred-operation queues have to be split or merged as well -- ugh!.]
+
+@node Buffer I/O and Free-List Management, Error Handling, Concurrency, Theory
+@section Buffer, I/O, and Free-List Management
+
+@menu
+* Reclaiming Buffers::          
+* update-access::               
+* Deferred writes of data blocks::  
+* Caching of last (leaf) block used::  
+* Multiple Read Access::        
+* Free-block management::       
+* Buffer management routines::  
+* Other issues to document::    
+@end menu
+
+@node Reclaiming Buffers, update-access, Buffer I/O and Free-List Management, Buffer I/O and Free-List Management
+@subsection Reclaiming Buffers
+
+@subheading age vs. level vs. dirtiness
+
+@emph{This is a perennial nuisance} -- There is a complex system in
+place which hasn't really been evaluated or tuned, and there is also a
+proposal by Jonathan to simply use the first free (or free-able) buffer
+one finds.
+
+@node update-access, Deferred writes of data blocks, Reclaiming Buffers, Buffer I/O and Free-List Management
+@subsection update-access
+
+It seems to me there was some case where it wasn't OK to just do a
+release to #f and an update from there -- but I can't think of it
+offhand @dots{}
+
+@node Deferred writes of data blocks, Caching of last (leaf) block used, update-access, Buffer I/O and Free-List Management
+@subsection Deferred writes of data blocks
+
+Note: this is a different sort of referral from the "deferred index
+updates" discussed earlier.  Those deferred operations were correctness-
+preserving; these are not.  The idea here is that we can reduce i/o
+traffic if we can safely lose a "small" number of updates.
+
+@subsubheading Description and purpose
+
+The general idea here is that we can reduce I/O traffic by
+deferring writes of leaf blocks, in the sense that the updates can be
+lost without compromising the structure of the database.  This only
+works where the data updates in question are not critical to database
+or application.  Currently, we always defer leaf updates -- both PUTs
+and REMoves -- to data trees, where a data tree is any tree not of
+type DIRECTORY.  (DIRECTORY leaf blocks are written to disk after every
+update.) The idea is that the user application should have control over
+how often the data blocks are written.
+
+Also, referral of PUTs and DELETES should be separately controllable.
+This feature is needed for example by the database itself in
+maintaining the free list: we can afford to defer INSERTS of deleted
+block, because the worst that could happen is that a free block gets
+lost.  But DELETES from the free list must update immediately, else a
+block could be doubly-allocated.
+
+@subsubheading Implementation
+
+The handle field @samp{wcb} has the following boolean values:
+
+@enumerate a
+@item
+SAP: save block after PUTs
+@item
+SAR: save block after REMOVEs
+@item
+SAC: force block save after cached block changes (not currently
+implemented)
+@item
+FAC: flush buffer entirely after cached block changes (not currently
+implemented -- future functionality)
+@end enumerate
+
+These bits are set as follows:
+
+@table @asis
+@item DIRECTORY
+SAP=SAR=1;
+@item FREE LIST
+SAR=1; SAP=SAC=0;
+@item USER DATA
+SAP=SAR=SAC=0;
+@end table
+
+The state of these bits can be changed at any time using
+@code{(han:set-wcb! @var{han} @var{new-bits})}.  Directory trees force
+@code{wcb-sap} and @code{wcb-sar} when opened or created.  Also,
+@code{open_seg} forces the free list write control bits to be as shown
+above, regardless of the block type of the free-list.
+
+Calling @code{flush-ents} flushes some modified blocks.  It is thread
+safe and can be called by a timer interrupt.
+
+@node Caching of last (leaf) block used, Multiple Read Access, Deferred writes of data blocks, Buffer I/O and Free-List Management
+@subsection Caching of last (leaf) block used
+
+Works great
+
+NOT IMPLEMENTED YET: We could actually be cleverer and cache the parents of
+every node, and even the PREVs, using the same TRY-GET-ENT  protocol!
+
+@node Multiple Read Access, Free-block management, Caching of last (leaf) block used, Buffer I/O and Free-List Management
+@subsection Multiple Read Access
+
+Multiple READ access is not supported yet.  READ-READ conflicts can
+occur.  We seem to recall noting that this limitation kept us from
+encountering some other problem, whose identity is lost for the moment.
+
+@node Free-block management, Buffer management routines, Multiple Read Access, Buffer I/O and Free-List Management
+@subsection Free-block management
+
+Outline:
+
+@itemize @bullet
+@item
+ free list is implemented as a B tree (its root block is in
+  block 2 of the file)
+@item
+ with cache (free-list-cache, one per segment)
+@item
+ cache gets filled (to 1/2 full) when it empty and a block is needed;
+  it gets flushed (to 1/2 full) when its about to overflow.
+@item
+ cache can be filled either from the free-list-tree or if that's
+  empty, the file is extended.
+@item
+ cache filling is now done efficiently using scan-delete.  This
+  also means that only one disk write will be done per
+  fill (in most cases).
+@item
+ cache filling is interlocked so only one process can be filling the
+  cache at a time.
+@item
+ currently cache emptying is inefficient as each write of of a block
+  to the tree causes an I/O [deferred writes is intended to fix this]
+@end itemize
+
+Current problems:
+
+Last week (1/8) we concluded that (all efforts to date
+notwithstanding) there were still failure cases in free-block
+management under concurrent operation, because of problems like:
+
+@itemize @bullet
+@item
+ multiple processes can eat up however many blocks are in the cache,
+meaning we still haven't handled the case where a PUT to the free list
+causes a block split (necessitating a recursive call to FREE-BLOCK).
+
+@item
+ Conversely, it is possible for the cache to become overfilled
+by a cache filling operation, if in the meantime OTHER processes fill
+the cache with deleted blocks.
+
+@item
+ We need to be sure in general that concurrent fills and/or empties
+don't overfill or over-drain the cache.
+@end itemize
+
+On the positive side, we realized that we NEED NOT allow enough
+free blocks for a free-list insert to split the whole tree -- any
+split except the leaf split can simply be postponed if there isn't a
+free block available at that time! (And similarly for any insert-updates
+that happen to be triggered by free-list accesses.)
+
+Come to think of it, if we happen to run out of blocks during a
+free-list insert, its OK to let the insert fail, we just lose one disk
+block!! That may just be the answer!!
+
+@node Buffer management routines, Other issues to document, Free-block management, Buffer I/O and Free-List Management
+@subsection Buffer management routines
+
+Two routines have been built for purging buffers.
+
+FLUSH-BUFFER(ENT) writes out ENT if it is dirty and unlocked.
+It returns TERMINATED if ENT is locked, RETRYERR if the write is
+attempted and fails, and SUCCESS otherwise.
+
+PURGE-BUFFER(ENT) writes out ENT if it is dirty and then
+frees up the buffer.  This IGNORES the access status of the buffer,
+so it should not be called by users; it always returns SUCCESS.
+
+Use (DO-SEG-BUFFERS SEG FUNC) to apply a function to all the buffers
+of a given segment; for example, (DO-SEG-BUFFERS SEG FLUSH-BUFFER)
+can be used to guarantee that segment SEG's disk file is up to date.
+DO-SEG-BUFFERS halts if FUNC returns other than SUCCESS; the result of
+FUNC is returned.  SUCCESS is returned if all buffers have been
+successfully processed.  To process all segments, use SEG = #f.
+
+(CHECK-BUFFER ENT) checks that the buffer is written and unlocked,
+and repairs those that are not.
+
+@node Other issues to document,  , Buffer management routines, Buffer I/O and Free-List Management
+@subsection Other issues to document
+
+@itemize @bullet
+@item
+bucket-locking method
+@item
+treatment of access conflict conditions
+@item
+amnesia-ent
+@item
+caching criteria (eh?)
+@end itemize
+
+@node Error Handling, Longer Value Fields, Buffer I/O and Free-List Management, Theory
+@section Error Handling
+
+The problem: Calls need to return adequate information to distinguish:
+
+@enumerate 1
+@item
+restartable operations, for example
+
+@itemize @bullet
+@item
+update-parent on insert
+@item
+update-parent on delete
+@item
+unlink for delete
+@end itemize
+
+@item
+non-restartable failures (eg. disk i/o error)
+@item
+null results (eg. key not found)
+@item
+"real values", eg. the length of a returned string, or an ENT pointer
+vs. NULL.
+@end enumerate
+
+The solution: use a bounded range of negative values as "failure"
+codes, leaving the non-negative return values available as "success"
+codes.  The canonical success code is 0, but a routine that needs to
+return a value (string length, ENT pointer) can do so and have that
+value interpreted as a "success" code as well.
+
+There are "degrees" of failure, and the negative codes are partitioned
+according to increasingly severity, as follows:
+
+@multitable @columnfractions .10 .25 .65
+@item @var{value}
+@tab C name
+@tab Meaning
+
+@item 0
+@tab success
+@tab successful execution
+@cindex success
+
+@item -1
+@tab notpres
+@tab successful execution, no data present or no change made
+@cindex notpres
+
+@item -2
+@tab terminated
+@tab failure, no damage, caller can retry operation
+@cindex terminated
+
+@item -10
+@tab retryerr
+@tab failure, no damage, caller can retry operation
+@cindex retryerr
+
+@item -13
+@tab keyerr
+@tab failure, no damage, call was in error
+@cindex keyerr
+
+@item -15
+@tab argerr
+@tab failure, no damage, call was in error
+@cindex argerr
+
+@item -20
+@tab noroom
+@tab failure, no damage, out of room in file
+@cindex noroom
+
+@item -30
+@tab typerr
+@tab failure, file or object was not of correct type
+@cindex typerr
+
+@item -40
+@tab ioerr
+@tab i/o error, DB may be damaged
+@cindex ioerr
+
+@item -45
+@tab strangerr
+@tab internal error, DB may be damaged
+@cindex strangerr
+
+@item -90
+@tab unkerr
+@tab placeholder code
+@cindex unkerr
+
+@item -100
+@tab maxerr
+@cindex maxerr
+
+@end multitable
+
+The first class represent operations that completed without error.  The
+second class represent operations that failed to complete, but are
+guaranteed to leave the DB in a correct state and are retry-able (or
+easily correctable).  The third class represent operations that failed
+to complete, did not damage the database, but are not easily fixable or
+restartable.  The last class represent error conditions in which the DB
+was corrupted, or during which DB corruption was detected.
+
+The predicate (ERR? code) returns #t if the return code is within the
+range NOTPRES-MAXERR; the predicate (REALERR? code) returns #t if CODE
+is an actual error, as opposed to a "not there" or "stop processing"
+message.
+
+
+@node Longer Value Fields, Unlimited Length Keys and Values, Error Handling, Theory
+@section  Longer Value Fields
+
+The 256.B length limit for value strings was a barrier to many
+possible applications for WB.  The @code{db:get} and @code{db:put!}
+procedures in @file{wbscm.c} work with value strings up to 64770.B in
+length (@pxref{SCM Record Operations}).
+
+For a value string of length L:
+
+@table @asis
+@item 0.B <= L <= 255.B
+The value string is stored literally with given key.
+
+@item 256.B <= L <= 64770.B
+The first 255 bytes of the value string is stored literally with the
+given key.  Successive 255 byte chunks of the value string are stored
+as L/255-1 sequential key-value pairs.  The key for each chunk is the
+given key with the index byte 1 <= k <= 254 appended to it.
+
+Note that use of bt:scan is complicated by long value strings.
+@end table
+
+@subheading Proposed Extensions
+
+@noindent
+The rest are proposed extensions to unlimited value string length.
+
+@table @asis
+@item 256.B <= L <= @var{bsiz} - 20
+The b-tree value fields points to a type @dfn{datalong} @footnote{This
+option requires a new type of WB block having the usual 20-byte header
+and a 2-byte length field.  Each block would hold up to @var{bsiz}-20
+bytes of data.} block, which contains the value.
+
+The @var{bsiz} argument to @code{make_seg()} or @var{block-size}
+argument to @code{make-seg} is the size of all WB blocks (pages) in
+that segment.
+
+@item @var{bsiz} < L
+Value points to head of a chain or tree of datalong blocks.  Retrieved
+value assembly limits practical size.  Storage efficiency is good for
+L >> @var{bsiz}.
+
+An interesting variant is to have two trees, one for datalongs and the
+other for everything else.  If the two trees are in separate segments
+(stored in separate files), then the datalong segment blocksize can be
+optimized without impacting speed for non-datalong operations.
+
+@item @var{bsiz} < L
+Value designates external file containing data.  storage efficiency is
+good for L >> @var{bsiz}.  Retrieved value needs no assembly; use mmap().
+@end table
+
+@node Unlimited Length Keys and Values, To Be Done, Longer Value Fields, Theory
+@section  Unlimited Length Keys and Values
+
+by Jonathan Finger
+
+Use 2 btrees which I will refer to as @dfn{main} and @dfn{slave}
+@cindex main
+@cindex slave
+
+notation
+D[123,4567]
+will translate into a string
+D \3 1 2 3 \4 4 5 6 7
+where \3 is ascii 3 etc (length of following string of digits)
+this will result in keys sorting in numerical order.
+
+@enumerate
+@item Data  (the easy part)
+
+The first byte of data is a flag.
+
+IF the data length < 255
+
+THEN
+
+store in bytes 1 - (length_of_data + 1)
+
+ELSE
+
+In slave btree increment value in key D (D for data)
+
+As an example assume the new value is 2357
+and the data is 10,000 bytes
+
+@example
+Store the data in
+D[2357,0] = first 250 bytes
+D[2357,1] = second 250 bytes
+  .
+  .
+  .
+D[2357,249] = last 250 bytes
+@end example
+
+When a new value is set, if it is > 254 bytes in length then
+you reuse the D[2357] names adding or deleting as needed.  Note
+that it is much more efficient to overwrite existing nodes since
+(most) of them will be the same size and add or delete at the end.
+If the new value < 255 bytes delete D[2357] and store the
+value in the master btree.
+
+@item Keys (the hard part)
+IF key < 250 bytes
+
+THEN
+
+Store in master file as usual
+
+ELSE (key >= 250 bytes)
+
+break up the key into chunks C0 ... CN; the first 250 bytes long and
+the rest 220 bytes long.
+
+Create the entries (assume current value of key V is 243)
+@example
+Master btree
+C0 = (flag)244
+Slave btree
+V[244,C1] = 245
+V[245,C2] = 246
+    .
+    .
+    .
+V[244 + N,CN] = data
+@end example
+
+A get now consistes of breaking up the key and following the chain.
+The put, delete, next, and prev code will get a bit messy since
+there will be multiple cases to consider.
+@end enumerate
+
+I believe this scheme will give unlimited key and data length.
+Performance probably will not be great but may be acceptable.
+This should give good key compression.
+
+
+
+@node To Be Done, Miscellany, Unlimited Length Keys and Values, Theory
+@section To Be Done
+
+@noindent
+I think most of the items in RJZ's list have been done.
+
+RJZ Modified 4/8/1993
+
+@table @asis
+
+@item B-tree maintenacne
+@itemize @bullet
+
+@item
+Implement deferred INDEX updates (in progress).
+
+@item
+Fix bug in PREV re missing down-ptrs.
+
+@item
+Implement fix for insert-screw-case (flag in root or wherever it was).
+@end itemize
+
+@item I/O
+@itemize @bullet
+@item
+Implement and test random page replacement.
+@item
+Implement parent/PREV caching??
+@end itemize
+
+@item Concurrency
+@itemize @bullet
+@item
+Assure enough FLC blocks for freelist splits in concurrent situation.
+(there seems to be a class of problems about concurrent free-list
+operations: a flush can fail if it causes a split and all the free
+blocks have been used meanwhile; simultaneous flush and fills; and the
+like. One good idea: since its ok if parent-updates fail, we can reduce
+the number of blocks a split can REQUIRE to 1 leaf block, rather than
+log-N blocks).
+@end itemize
+
+@item Error handling
+@itemize @bullet
+@item
+Finish implementation of error-handling protocol??
+@item
+Error log?
+@item
+Recode error msg calls to take less (code) space?
+@end itemize
+
+@item Miscellany
+@itemize @bullet
+@item
+Count SCAN does not need to copy value strings (since block is copied).
+@item
+Jonathan wants the ability to create a seg that need not be kept valid
+on disk -- one that can just be rebuilt if the system crashes.  This
+means (a) a WCB bit in HANDLEs to control "essential" updates and (b) an
+arg to OPEN-SEG specifying SAFETY (it isnt valid to specify this option
+on a per-handle basis).
+@item
+Jonathan wants to replace FLUSH-SOME-BUKS with a call that scans ENT-TAB
+for a flushable ENT and another call to (carefully) flush it.
+@item
+Reduce number of arguments to scan using packets?
+@item
+Create memory-resident segment?
+@item
+See if packets can be replaced with multiple values?
+@end itemize
+
+@item Design/Documentation
+
+@itemize @bullet
+@item
+Spell check!
+@item
+Document format of data file (blocks 0,1,2).
+@item
+Document type S blocks.
+@item
+Write up thoughts on error-info protocol.
+@item
+Write up WRITE order for blk splits.
+@item
+Read papers (SAGIV, WANG, TRANSACTION book) to see how THEY ahndle the
+difficult problems of delayed update and their ordering, and the 2-block
+mod problem for DELETE.
+
+@end itemize
+@end table
+
+
+@node Miscellany,  , To Be Done, Theory
+@section Miscellany
+
+@table @asis
+@item "Largest keys" (End-of-chain marker strings).
+
+Because we've reserved keys with a first byte of FF for split keys,
+these keys are unavailable to the user.
+
+@item NULL keys
+
+WB supports use of the null string as a key (Sliced Bread treats the key
+specially).
+
+@item Searching on minimum and maximum keys
+
+Given that the null string may be used as a key, there needs to be a
+way to specify a "least" key such that NEXT(least) yields the first
+key, even if it is NULL.  The special key strings with length s of -2
+and -1 are provided to represent the minimum and maximum key values,
+respectively.  These keys are only useful with NEXT, PREV, REM*, and
+SCAN; data cannot be associated with these keys.
+
+@item Need to document TSCAN, TSTATS.
+@end table
+
+@subsection Bibliography
+
+A comprehensive B-tree bibliography can be found at:
+@url{http://www.informatik.uni-trier.de/~ley/db/access/btree.html}
+
+@table @asis
+
+@item [BM72]
+R. Bayer and E. McCreight.
+@cite{Organization and maintenance of large ordered indexes.}
+Acta Informatica, 1:173-189, 1972.
+
+@item [SAGIV]
+@cindex SAGIV
+Yehoshua Sagiv.
+@cite{Concurrent Operations on B*-trees with Overtaking.}
+@ifset html
+<A HREF="http://www.informatik.uni-trier.de/~ley/db/journals/jcss/jcss33.html#Sagiv86">
+@end ifset
+JCSS 33(2):
+@ifset html
+</A>
+@end ifset
+275-296 (1986)
+
+@item [WANG]
+W.E. Weihl and P. Wang.
+@cite{Multi-version memory: Software cache management for concurrent B-trees.}
+In Proc. 2nd IEEE Symp. Parallel and Distributed Processing, 650-655, 1990.
+
+@end table
+
+
+@node C Interface, Java Interface, Theory, Top
+@chapter C Interface
+
+@menu
+* C Compile-Time Parameters::   
+* C Status Codes::              
+* C SEGs::                      
+* C HANDs and Tree Operations::  
+* C Scan::                      
+@end menu
+
+@node C Compile-Time Parameters, C Status Codes, C Interface, C Interface
+@section C Compile-Time Parameters
+
+The C Preprocessor Constants in this section are defined in
+@file{wbdefs.h} which is derived from @file{wbdefs.scm}.
+
+@cindex freelist
+@cindex flc
+Each segment (file-based or not) maintains a @dfn{freelist} of disk
+@cindex freelist
+blocks.  In a newly created segment, nearly all of its block numbers
+are in the freelist.
+
+@defvr {C Preprocessor Constant} flc_len 
+@code{flc_len} must be larger than 2 times the maximum number of
+blocks which would ever be needed for a freelist split.  The minimum
+for @code{flc_len} is 10.
+@end defvr
+
+
+@node C Status Codes, C SEGs, C Compile-Time Parameters, C Interface
+@section C Status Codes
+
+@include c/wbdefs.txi
+
+@subsection C Diagnostic Channel
+
+The machine translated source utilizes @code{dprintf} as a
+platform-independent way to log diagnostic, warning, and error messages.
+@code{tdprintf}
+
+@deffn {C Preprocessor Macro} dprintf ((diagout, const char *@var{template}, @dots{}))
+The single argument to @code{dprintf} must be an argument list within
+parenthesis (eg. double parentheses).  The first argument inside this
+list should be literally @code{diagout}.  @var{template} is a
+@dfn{printf} style format string followed by the arguments for
+@cindex printf
+formatting, as with @code{printf}.
+@end deffn
+
+@node C SEGs, C HANDs and Tree Operations, C Status Codes, C Interface
+@section C SEGs
+
+@include c/segs.txi
+
+
+@node C HANDs and Tree Operations, C Scan, C SEGs, C Interface
+@section C HANDs and Tree Operations
+
+@include c/db.texi
+@include c/handle.txi
+
+
+@node C Scan,  , C HANDs and Tree Operations, C Interface
+@section C Scan
+
+@include c/scan.txi
+
+
+
+@node Java Interface, C# Interface, C Interface, Top
+@chapter Java Interface
+
+@menu
+* Java Status Codes::           
+* Java SEGs::                   
+* Java HANDs and Tree Operations::  
+* Java Legacy API::             
+@end menu
+
+@node Java Status Codes, Java SEGs, Java Interface, Java Interface
+@section Java Status Codes
+
+@include java/wb/Wbdefs.txi
+
+
+@node Java SEGs, Java HANDs and Tree Operations, Java Status Codes, Java Interface
+@section Java SEGs
+@cindex SEG
+
+@include java/wb/Segs.txi
+
+
+@node Java HANDs and Tree Operations, Java Legacy API, Java SEGs, Java Interface
+@section Java HANDs and Tree Operations
+@cindex HAND
+
+@include java/wb/Db.txi
+
+
+@node Java Legacy API,  , Java HANDs and Tree Operations, Java Interface
+@section Java Legacy API
+
+This API has identical argument configurations as the C code,
+including length arguments to complement each byte-vector argument.
+
+@include java/wb/Handle.txi
+@include java/wb/Scan.txi
+
+
+@node C# Interface, SCM Interface, Java Interface, Top
+@chapter C# Interface
+
+@menu
+* C# Status Codes::             
+* C# SEGs::                     
+* C# HANDs and Tree Operations::  
+* C# Legacy API::               
+@end menu
+
+@node C# Status Codes, C# SEGs, C# Interface, C# Interface
+@section C# Status Codes
+
+@include csharp/Wbdefs.txi
+
+
+@node C# SEGs, C# HANDs and Tree Operations, C# Status Codes, C# Interface
+@section C# SEGs
+@cindex SEG
+
+@include csharp/Segs.txi
+
+
+@node C# HANDs and Tree Operations, C# Legacy API, C# SEGs, C# Interface
+@section C# HANDs and Tree Operations
+@cindex HAND
+
+@include csharp/Db.txi
+
+
+@node C# Legacy API,  , C# HANDs and Tree Operations, C# Interface
+@section C# Legacy API
+
+This API has identical argument configurations as the C code,
+including length arguments to complement each byte-vector argument.
+
+@include csharp/Handle.txi
+@include csharp/Scan.txi
+
+
+@node SCM Interface, SCM Relational Databases, C# Interface, Top
+@chapter SCM Interface
+
+DBSCM is a disk based, sorted associative array package (WB)
+integrated into the Scheme implementation SCM.  These associative
+arrays consist of keys which are strings of length less than 256 bytes
+and values which are strings of length less than 64770.B.  Associative
+arrays can be used to form a MUMPS style database which can be used to
+implement standard record structures without auxiliary files (see
+example in example.scm).
+
+The WB implementation (compiled) adds about 66 kilobytes to the size of
+SCM.
+
+@menu
+* SCM Status Codes::            
+* SCM Segments::                
+* SCM B-Trees::                 
+* SCM Record Operations::       
+* SCM Mutual Exclusion::        
+* SCM Multiple Operations::     
+* SCM Diagnostics::             
+@end menu
+
+@node SCM Status Codes, SCM Segments, SCM Interface, SCM Interface
+@section SCM Status Codes
+
+@defun err? x
+Return @var{x} if a valid error code (-1 @dots{} @var{MAXERR});
+else #f.
+@end defun
+
+@defun success? x
+Not @code{@code{err?}}.
+@end defun
+
+@defvr {constant} success
+Successful execution (0).
+@cindex success
+@end defvr
+
+@noindent
+Negative integers are used for errors according to increasingly
+severity, as follows:
+
+@defvr {constant} notpres
+Successful execution, no data present or no change made
+@cindex notpres
+@end defvr
+
+@defvr {constant} terminated
+Failure, no damage, caller can retry operation
+@cindex terminated
+@end defvr
+
+@defvr {constant} retryerr
+Failure, no damage, caller can retry operation
+@cindex retryerr
+@end defvr
+
+@defvr {constant} keyerr
+Failure, no damage, call was in error
+@cindex keyerr
+@end defvr
+
+@defvr {constant} argerr
+Failure, no damage, call was in error
+@cindex argerr
+@end defvr
+
+@defvr {constant} noroom
+Failure, no damage, out of room in file.
+@cindex noroom
+@end defvr
+
+@defvr {constant} typerr
+Failure, file or object was not of correct type.
+@cindex typerr
+@end defvr
+
+@defvr {constant} ioerr
+I/O error, DB may be damaged.
+@cindex ioerr
+@end defvr
+
+@defvr {constant} strangerr
+Internal error, DB may be damaged.
+@cindex strangerr
+@end defvr
+
+@defvr {constant} unkerr
+Placeholder code.
+@cindex unkerr
+@end defvr
+
+@defvr {constant} maxerr
+All error codes are between 0 and @code{maxerr}.
+@cindex maxerr
+@end defvr
+
+
+@node SCM Segments, SCM B-Trees, SCM Status Codes, SCM Interface
+@section SCM Segments
+
+The @var{block-size} of a segment (given in call to @code{make-seg})
+is a parameter crucial for performance; balancing CPU time traversing
+blocks with file-system latency.  @var{block-size} should be an
+integer multiple of the file-system block size.
+
+In the 1990s our nominal @var{block-size} was 2.kiB; now it should
+probably be 4.kiB, 8.kiB, or 16.kiB.
+
+@deffn {Scheme Procedure} init-wb max-num-ents max-num-buks max-blk-size
+
+Initializes the WB system.  @var{Max-blk-size} determines the size of
+the disk cache buffers.  @var{max-num-ents} is the number of disk
+cache buffers to be allocated.  (* @var{max-num-ents}
+@var{Max-blk-size}) should be less than the size of RAM on your
+computer.  If not all @var{max-num-ents} cannot be allocated (by
+malloc) then WB can still run properly.  @var{max-num-buks} is the
+number of hash buckets for the disk cache.  It should be of
+approximately the same size as or larger than @var{max-num-ents}.  The
+number of buffers actually allocated is returned if successful; a
+status code is returned otherwise.
+
+If @code{init-wb} is called with the same arguments after it has
+already been called, @code{NOTPRES} (-1) is returned.
+@end deffn
+
+@deffn {Scheme Procedure} final-wb
+
+Frees all memory used by the WB system.  All segments will be closed.
+@end deffn
+
+@deffn {Scheme Procedure} open-seg filename mutable?
+
+Opens the database file @var{filename} and returns a segment if
+successful, and false otherwise.  The database will be read-only if
+the @var{mutable?} argument is false.  It will be read-write if the
+@var{mutable?} argument is true.
+@end deffn
+
+@deffn {Scheme Procedure} close-seg seg hammer
+
+Closes database segment @var{seg} and the file containing it.  If
+@var{hammer} is #f then if there are any problems freeing buffers then
+the close is aborted.  A status code is returned.
+@end deffn
+
+@deffn {Scheme Procedure} make-seg filename block-size
+
+The integer @var{block-size} specifies the size of B-tree blocks.
+@var{block-size} should be an
+integer multiple of the file-system block size.  Nominal value
+is 4096.
+
+@code{make-seg} creates a new open empty mutable database @var{seg} of
+name @var{filename}.  If successful, @var{seg} is returned; otherwise
+a status code is returned.
+@end deffn
+
+@node SCM B-Trees, SCM Record Operations, SCM Segments, SCM Interface
+@section SCM B-Trees
+
+@cindex WCB
+The write-control-bits argument (@var{WCB}) to these functions controls
+the latency of updates to the file after various operations.  These bits
+are defined as follows:
+
+@multitable @columnfractions .1 .2 .6
+@item @var{value}
+@tab Name
+@tab Meaning
+
+@item 1
+@tab WCB-SAP
+@tab save block after PUTs
+@cindex WCB-SAP
+@item 2
+@tab WCB-SAR
+@tab save block after REMOVEs
+@cindex WCB-SAR
+@item 4
+@tab WCB-SAC
+@tab force block save after cached block changes (not currently
+implemented)
+@cindex WCB-SAC
+@item 8
+@tab WCB-FAC
+@tab flush buffer entirely after cached block changes (not currently
+implemented)
+@cindex WCB-FAC
+@end multitable
+
+@deffn {Scheme Procedure} create-bt seg typ wcb
+
+Creates a new root block in seg @var{seg} of type @var{typ} and
+returns a bt-handle open to it if successful; otherwise #f.  This
+would typically be used to create a temporary b-tree which should be
+reclaimed by check if system crashes.
+@end deffn
+
+@deffn {Scheme Procedure} open-bt seg blknum wcb
+
+Returns a bt-handle open to seg number @var{seg}, block number
+@var{blknum} if successful; otherwise #f.  If no such block exists or
+is not a root block, #f is returned.
+@end deffn
+
+
+For @code{create-db} and @code{open-db}, the implicit @var{WCB}
+argument is the combination of @samp{WCB-SAP} and @samp{WCB-SAR}.
+
+@deffn {Scheme Procedure} create-db seg typ name
+
+Returns a B-tree whose name has been entered in the root directory if
+successful; otherwise #f.
+
+@var{typ} should be either
+
+@itemize @bullet
+@item @code{#\D} (directory) or
+@item @code{#\T} (regular tree).
+@end itemize
+
+B-trees with @var{typ} @code{#\D} which are pointed to by special
+entries in the root block (1) protect all their special entries from
+garbage collection by the check program.  @code{#\T} is for regular
+(data) arrays.
+
+@end deffn
+
+@deffn {Scheme Procedure} open-db seg name
+
+Returns the B-tree whose name has been entered in the root directory
+or #f if not found.
+@end deffn
+
+Dirty block buffers can also be flushed to disk by calls to
+@code{flush-ents}.  @code{flush-ents} can be called at any time after
+WB is initialized, even by an asynchronous background process.
+
+@deffn {Scheme Procedure} flush-ents attempts k
+
+@var{k} is the number of dirty block buffers to write to disk;
+@var{attempts} is the number of times to try.  Note that blocks in any
+segment may be written by @code{flush-ents}.  @code{flush-ents}
+returns the number of blocks written.
+@end deffn
+
+Block numbers are stored in the directory as four-byte integers.  In
+order to make WB files portable between big-endian and little-endian
+computers, all conversions of four-byte pointers should be done by
+@code{str2long} and @code{long2str!}.
+
+@deffn {Scheme Procedure} str2long string index
+
+Converts the 4 bytes in @var{string} starting at @var{index} into an
+unsigned integer and returns it.
+@end deffn
+
+@deffn {Scheme Procedure} long2str! string index integer
+
+Stores @var{integer} into 4 bytes of @var{string} starting at
+@var{index}.
+@end deffn
+
+
+@node SCM Record Operations, SCM Mutual Exclusion, SCM B-Trees, SCM Interface
+@section SCM Record Operations
+
+@deffn {Scheme Procedure} bt:get han key
+
+@var{han} is a handle to an open bt.  @var{key} is a string less than
+255.B in length.
+
+@code{bt:get} returns a string of the value associated with @var{key}
+in the bt which @var{han} is open to.  @code{bt:get} returns #f if
+@var{key} is not associated in the bt.
+@end deffn
+
+@deffn {Scheme Procedure} bt:next han key
+
+@var{han} is a handle to an open bt.  @var{key} is a string less than
+255.B in length.
+
+@code{bt:next} returns the next @var{key} in bt @var{han} or #f if
+none.
+@end deffn
+
+@deffn {Scheme Procedure} bt:prev han key
+
+@var{han} is a handle to an open bt.  @var{key} is a string less than
+255.B in length.
+
+@code{bt:prev} returns the previous @var{key} in bt @var{han} or #f if
+none.
+@end deffn
+
+@deffn {Scheme Procedure} bt:put! han key val
+
+@var{han} is a handle to an open, mutable bt.  @var{key} and @var{val}
+are strings less than 255.B in length.
+
+@code{bt:put!} associates @var{key} with @var{val} in the bt
+@var{han}.  A status code is returned.
+@end deffn
+
+@deffn {Scheme Procedure} bt:rem! han key
+
+@var{han} is a handle to an open, mutable bt.  @var{key} is a string
+less than 255.B in length.
+
+@code{bt:rem!} removes @var{key} and it's associated value from bt
+@var{han}.
+@end deffn
+
+@noindent
+The value strings @code{bt:get} and @code{bt:put!} work with are
+limited to 255.B in length.  @code{db:get} and @code{db:put!} work
+with value strings up to 64770.B in length.
+
+@deffn {Scheme Procedure} db:get han key
+
+@var{han} is a handle to an open bt.  @var{key} is a string less than
+255.B in length.
+
+@code{db:get} returns a string (up to 64770.B long) of the value
+associated with @var{key} in the bt which @var{han} is open to.
+Returns #f if @var{key} is not in the bt.
+@end deffn
+
+@deffn {Scheme Procedure} db:put! han key val
+
+@var{han} is a handle to an open, mutable bt.  @var{key} is a string
+less than 255.B in length.  @var{val} is a string less than 64770.B in
+length.
+
+@code{db:put!} associates @var{key} with @var{val} in the bt
+@var{han}.  A status code is returned.
+@end deffn
+
+
+@node SCM Mutual Exclusion, SCM Multiple Operations, SCM Record Operations, SCM Interface
+@section SCM Mutual Exclusion
+
+These 2 calls can be used for locking and synchronizing processes.
+
+@deffn {Scheme Procedure} bt:put han key val
+
+Associates @var{key} with @var{val} in the bt @var{han} only if
+@var{key} was previously empty.  Returns #t for success, #f for failure.
+@end deffn
+
+@deffn {Scheme Procedure} bt:rem han key
+
+Removes @var{key} and it's associated value from bt @var{han} only if
+@var{key} is present.  Returns @var{key}'s value for success, #f for
+failure (not present).
+@end deffn
+
+
+@node SCM Multiple Operations, SCM Diagnostics, SCM Mutual Exclusion, SCM Interface
+@section SCM Multiple Operations
+
+@deffn {Scheme Procedure} bt:rem* han key1 key2
+
+Removes @var{key}s (and their associated values) between (including) @var{key1}
+and (not including) @var{key2} from bt @var{han}.  A status code is returned.
+@end deffn
+
+@deffn {Scheme Procedure} bt:scan han op key1 key2 func blklimit
+
+Applies procedure @var{func} to a range of keys (and values) and either
+counts, modifies, or deletes those associations.  A list of a status
+code, the count of records processed, and a new value for @var{key1} is
+returned.
+
+If @var{op} is -1, indicated keys will be deleted;  If @var{op} is 0, indicated
+keys will be counted;  If @var{op} is 1, the value of each key in the range
+will be changed to be the string returned by @var{func}.
+
+@var{Func} is called with 2 string arguments, the key and the value.  If @var{op}
+is 1 and @var{func} returns #f then no change will be made.  If @var{op} is 1 and
+@var{func} returns a string then that string will replace the value for that
+key.  For the other (count, delete) modes, @var{func} should return #f or
+#t.  If @var{func} is #t, the association will be counted (and possibly
+deleted).
+
+Keys from @var{key1} (inclusive) up to @var{key2} (exclusive) are
+scanned.  If @var{blklimit} is -1 then the entire range is scanned; otherwise
+only as many blocks (internal database structures) as specified by
+@var{blklimit} are scanned.  The scan can be restarted by using the returned
+information.  For instance, the following expression counts the number
+of keys between "3" and "4" one block at a time and returns a list of
+the number of keys and the number of blocks.
+
+@example
+(do ((res (bt:scan current-bt 0 "3" "4" (lambda (k v) #t) 1)
+          (bt:scan current-bt 0 (caddr res) "4" (lambda (k v) #t) 1))
+     (blks 0 (+ 1 blks))
+     (cnt 0 (+ cnt (cadr res))))
+    ((not (= -1 (car res))) (list (+ cnt (cadr res)) (+ 1 blks))))
+@end example
+
+It is good to specify a positive @var{blklimit} when dealing with large
+scans.  More details on the operation of scan can be found in
+@file{scan.scm}.
+@end deffn
+
+
+@node SCM Diagnostics,  , SCM Multiple Operations, SCM Interface
+@section SCM Diagnostics
+
+The value returned by the following routines is unspecified.
+
+@deffn {Scheme Procedure} check-access
+
+Checks that buffers and locks are in a consistent state and fixes them
+if WB routines have been interrupted.
+@end deffn
+
+@deffn {Scheme Procedure} clear-stats
+
+Resets all the collected statistics to 0.
+@end deffn
+
+@deffn {Scheme Procedure} stats
+
+Prints a summary of operational statistics since the last
+@code{clear-stats} or @code{cstats}.
+@end deffn
+
+@deffn {Scheme Procedure} cstats
+
+Prints a summary of operational statistics since the last
+@code{clear-stats} or @code{cstats}, then calls @code{clear-stats}.
+@end deffn
+
+@deffn {Scheme Procedure} show-buffers
+
+Prints a table of the status of all disk cache buffers.
+@end deffn
+
+
+@node SCM Relational Databases, Procedure and Macro and Variable Index, SCM Interface, Top
+@chapter SCM Relational Databases
+
+These relational database packages are for the SCM interface.
+
+@menu
+* wb-table::                    
+* rwb-isam::                    Index-Sequential Access
+@end menu
+
+@node wb-table, rwb-isam, SCM Relational Databases, SCM Relational Databases
+@section wb-table
+
+@code{(require 'wb-table)}
+@cindex wb-table
+
+@code{wb-table} is a straightforward embedding of SLIB base-table
+(@pxref{Base Table, , , slib, SLIB}) in WB with SCM.
+It supports scheme expressions for keys and values whose text
+representations are less than 255 characters in length.  The primitive
+types supported are:
+
+@multitable @columnfractions .18 .82
+@item boolean
+@tab @code{#t} or @code{#f}.
+@item string
+@tab 0 - 255 byte string.
+@item symbol
+@tab 0 - 255 byte symbol.
+@item atom
+@tab internal legacy alias for symbol (or @code{#f}).
+@item integer
+@item number
+@item ordinal
+@tab String representation (< 256.B) of numbers.  Nonnegative integers sort correctly.
+@item expression
+@tab Scheme expression (representation must be < 256.B).
+@end multitable
+
+@node rwb-isam,  , wb-table, SCM Relational Databases
+@section rwb-isam
+
+@code{(require 'rwb-isam)}
+@cindex rwb-isam
+
+@dfn{rwb-isam} is a sophisticated base-table implementation built on
+WB and SCM which uses binary numerical formats for keys and non-key
+fields.  It supports IEEE floating-point and fixed-precision integer
+keys with the correct numerical collation order.
+
+In addition to the types described for wb-table, rwb-isam supports the
+following types for keys and values:
+
+@multitable @columnfractions .18 .82
+@item r64
+@tab Real represented by one IEEE 64.bit number.
+@item r32
+@tab Real represented by one IEEE 32.bit number.
+@item s64
+@tab Signed 64.bit integer.
+@item s32
+@tab Signed 32.bit integer.
+@item s16
+@tab Signed 16.bit integer.
+@item s8
+@tab Signed 8.bit integer.
+@item u64
+@tab Nonnegative 64.bit integer.
+@item u32
+@tab Nonnegative 32.bit integer.
+@item u16
+@tab Nonnegative 16.bit integer.
+@item u8
+@tab Nonnegative 8.bit integer.
+@end multitable
+
+Complex numbers are supported for non-key fields:
+
+@multitable @columnfractions .18 .82
+@item c64
+@tab Complex represented by two IEEE 64.bit numbers.
+@item c32
+@tab Complex represented by two IEEE 32.bit numbers.
+@end multitable
+
+
+@node Procedure and Macro and Variable Index, Concept Index, SCM Relational Databases, Top
+@unnumbered Procedure and Macro and Variable Index
+
+@c This is an alphabetical list of all the procedures, macros, and
+@c variables in WB.
+
+@printindex fn
+
+@node Concept Index,  , Procedure and Macro and Variable Index, Top
+@unnumbered Concept Index
+
+This is an alphabetical list of concepts introduced in this manual.
+
+@printindex cp
+
+@bye

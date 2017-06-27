@@ -1,0 +1,262 @@
+
+1.1 Description
+===============
+
+"WB" is a disk based (sorted) associative-array package providing C,
+SCM, Java, and C# libraries.  These associative arrays consist of
+variable length (0.B to 255.B) keys and values.  Functions are provided
+to:
+
+   * create, destroy, open and close disk-files and associative arrays;
+
+   * insert, delete, retrieve, find next, and find previous (with
+     respect to dictionary order of keys); and
+
+   * The atomic `put' and `rem' operations allow associations to be
+     used for process mutexs.
+
+   * apply functions, delete, or modify values over a range of
+     consecutive key values.
+
+The (database) disk files interoperate between the various language
+libraries.  The interface to the SCM Scheme implementation supports
+longer data values and SLIB relational databases.  WB, SCM, and SLIB
+are packages of the GNU project.
+
+The WB implementation has a file size limit of 2^32 * block size
+(default 2048.B) = 2^43 bytes (8796.GB).  WB routinely runs with
+databases of several hundred Megabytes.  WB does its own memory and
+disk management and maintains a RAM cache of recently used blocks.
+
+Multiple associative arrays can reside in one disk file.  Simultaneous
+access to multiple disk files is supported.  A structure checking and
+garbage collecting program and a viewer are provided.  Compiled, WB
+occupies approximately 66 kilobytes.
+
+WB is implemented using a variant of B-tree structure.  B-trees give
+slower access than hashing but are dynamic and provide an efficient
+determination of successor and predecessor keys.  All operations are
+O(log(n)) in the size of the database.  B-trees are commonly used by
+database systems for implementing index structures.  B-trees are
+optimized for using the minimum number of disk operations for large data
+structures.  Prefix and suffix key compression are used for storage
+efficiency in WB.
+
+
+1.6 License
+===========
+
+  Copyright (C) 1991, 1992, 1993, 1996, 1999, 2000, 2003, 2007, 2008
+                    Free Software Foundation, Inc.
+           59 Temple Place, Suite 330, Boston, MA 02111, USA
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this program.  If not, see
+<http://www.gnu.org/licenses/>.
+
+
+1.2 History
+===========
+
+The origination of B-trees is credited to [BM72] R. Bayer and E.
+McCreight in 1972.
+
+Working at Holland Mark Martin between 1991 and 1993, Roland Zito-Wolf,
+Jonathan Finger, and I (Aubrey Jaffer) wrote the "Wanna B-tree" system.
+
+Jonathan Finger wrote a MUMPS-like byte-coded interpreter "Sliced
+Bread" using WB.  The integrated system was heavily used by Holland Mark
+Martin for the rest of the decade.
+
+In 1994 I wrote a Scheme implementation of the relational model with an
+independent object-oriented base-table layer for SLIB:
+
+           `http://people.csail.mit.edu/jaffer/slib_6.html'
+
+In 1996 Holland Mark Martin assigned the copyriht for WB to the Free
+Software Foundation.  I released WB as a library for C and SCM.  I also
+wrote `wbtab.scm', a base-table interface enabling SLIB's relational
+database to be backed by WB.
+
+In 2002 I added color dictionary relational databases to SLIB.
+
+In 2003 I added "next" and "previous" operations to the SLIB relational
+package, and wrote `rwb-isam.scm' for WB.
+
+In 2004 I wrote FreeSnell, a program to compute optical properties of
+multilayer thin-film coatings.  At the core of FreeSnell is a rwb-isam
+spectral refractive-index database for over 300 materials.
+
+In 2006 I decided to reimplement ClearMethods' Water language on top of
+WB.  In 2007, in order to make Water available on the great majority of
+browsers and servers, Ravi Gorrepati adapted Schlep (the SCM to C
+translator) to make translators to Java and C#.  He also ported the
+support files and test programs to Java and C#.
+
+I continue to maintain WB.  The most recent information about WB can be
+found on WB's "WWW" home page:
+
+                `http://people.csail.mit.edu/jaffer/WB'
+
+
+1.3 File Organization
+=====================
+
+The source files for WB are written in the SCM dialect of Scheme:
+
+`wbdefs.scm'
+     SCM configuration definitions.
+
+`segs.scm'
+`handle.scm'
+`blink.scm'
+`prev.scm'
+`del.scm'
+`ents.scm'
+`scan.scm'
+`stats.scm'
+     SCM code for WB-trees.
+
+`blkio.scm'
+     wimpy POSIX interface to the disk.  Replace this if you have a more
+     direct interface to the disk.
+
+These files are translated into the C, C#, and Java targets by SCM
+scripts named "scm2c", "scm2cs", and "scm2java" respectively.  The
+function and variable data types in the target languages are determined
+by pattern-matching the first-element strings in the associations
+"scm2c.typ", "scm2cs.typ", and "scm2java.typ" respectively.
+
+Files translated to C are put into the `wb/' directory.  Files
+translated to Java are put into the `wb/java/' directory.  Files
+translated to C# are concatenated with `wb/csharp/Cssys.cs' and
+`wb/csharp/SchlepRT.cs' and written to `wb/csharp/Wb.cs'.
+
+In the `Makefile':
+`s2hfiles'
+     Derived *.h files for C.
+
+`s2cfiles'
+     Derived *.c files for C.
+
+`s2jfiles'
+     Derived java/*.java files for Java.
+
+`csharp/Wb.cs'
+     Single derived source file for C#.
+
+WB comes with a C utility program for database files stored on disk.
+
+ -- Program: wbcheck path
+     Checks the structure of the database named by PATH and reclaims
+     temporary trees to the freelist.
+
+Manifest
+--------
+
+`wb.info'
+     documents the theory, data formats, and algorithms; the C and SCM
+     interfaces to WB-tree.
+
+`ChangeLog'
+     documents changes to the WB.
+
+`example.scm'
+     example program using WB-tree in SCM.
+
+`wbsys.h'
+     The primary C include file for using the WB layer is is `wbsys.h',
+     which includes several other files from the directory.  `wbsys.h'
+     also defines WB's internal data types.
+
+`wbsys.c'
+     Shared data and low-level C accessors.
+
+`wbsys.scm'
+     Shared data and low-level accessors for debugging in SCM.
+
+`wbscm.c'
+     C code for the SCM interface to WB-trees.
+
+`db.scm'
+     code for SCM interface when debugging in SCM.
+
+`scm2c.scm'
+     SCM code which translates SCM code into C.
+
+`scm2c.typ'
+     rules relating variable names to types in generated C.
+
+`scm2cs.scm'
+     SCM code which translates SCM code into C#.
+
+`scm2cs.typ'
+     rules relating variable names to types in generated C#.
+
+`scm2java.scm'
+     SCM code which translates SCM code into Java.
+
+`scm2java.typ'
+     rules relating variable names to types in generated Java.
+
+`test.scm'
+     file for testing WB-tree system.
+
+`test2.scm'
+     more tests for WB-tree system.
+
+`Makefile'
+     Unix makefile
+
+`VMSBUILD.COM'
+     command script for compiling under VMS.
+
+`all.scm'
+     loads all the SCM files for debugging.
+
+`wbtab.scm'
+     SCM code allowing WB to implement SLIB relational databases.
+
+`rwb-isam.scm'
+     SCM code allowing WB to implement SLIB relational databases with
+     numerical and lexicographic key collations.
+
+`wbcheck.c'
+     program for checking, repairing, and garbage collecting WB-tree
+     databases.
+
+`wbview'
+     SCM script for displaying low-level WB database associations.
+
+
+
+1.4 Installation
+================
+
+WB unpacks into a directory called `wb'.
+
+If you plan to use WB with SCM, the directories `scm' and `wb' should
+be in the same directory.  Doing `make wbscm.so' in the scm directory
+compiles a dynamically linkable object file from the WB C source.
+Including the `-F wb' option to an executable build compiles the WB
+interface into the executable.  It is not necessary to compile anything
+in `wb' directory.
+
+`make all'
+     Compiles `libwb', `wbscm.so', `java/wb.jar', `csharp/Wb.dll' and
+     the `wbcheck' executable.
+
+`make install'
+     Installs `libwb', `wbscm.so', `java/wb.jar', and `wbcheck' in the
+     `$(prefix)' tree, as assigned in the `Makefile'.
+

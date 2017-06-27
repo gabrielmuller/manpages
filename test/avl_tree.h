@@ -15,7 +15,7 @@ namespace structures {
  *
  */
 
-template <typename T, typename S>
+template <typename F, typename S>
 class AVLTree {
 private:
  struct Node;
@@ -25,36 +25,61 @@ private:
    //terrível
    struct tree_info {
      std::string filename;  /**< FileIO */
-     T t_null; /**valor null de T*/
+     F t_null; /**valor null de F*/
      S s_null;
      size_t* total_size;
+     std::fstream* io;
    };
    tree_info info;
 
-   AVLTree(std::string filename_, T t_null_, S s_null_) {
+   ~AVLTree() {
+   	(info.io)->close();
+
+   	std::cout << "so long..." << std::endl;
+   }
+   AVLTree(std::string filename_, F t_null_, S s_null_) {
      info.filename = filename_;
      info.t_null = t_null_;
      info.s_null = s_null_;
      info.total_size = &size_;
+     info.io = new std::fstream(info.filename, std::ios::binary | std::ios::app | std::ios::out);
+
      root(new Node(info));
    }
+	void printfile() {
+		for (int i = 0; i < 100; i++) {
+			(info.io)->seekg(i*sizeof(int));
+			int r;
+			(info.io)->read((char*) &r, sizeof(int));
+			std::cout << r << ", ";
+		}
+		std::cout << std::endl;
+	}
+  void test() {
+	size_ = 1000;
+    root()->print();
+    root()->left(new Node(5, 77, 2, info));
+    root()->left()->print();
+    //root()->insert(5, 7);
+    this->printfile();
+  }
 
-  /** Insere dado.
-   *  \param data dado a inserir.
-   */
+
   Node* root() {
-    return new Node(0, info);
+    return new Node(1, info);
   }
 
   void root(Node* node) {
-    node->writeMe(0, info);
+    node->writeMe(1);
+    std::cout << "yep ";
+    node->print();
   }
 
-  void insert(const T& data, const S& second) {
+  void insert(const F& first, const S& second) {
     if (empty()) {
-      root(new Node(data, second, info));
+      root(new Node(first, second, 1, info));
     } else {
-      root()->insert(data, second);
+      root()->insert(first, second);
     }
     size_++;
   }
@@ -62,17 +87,17 @@ private:
   /** enjambreitioon
    *
    */
-  S find(T data) {
+  S find(F first) {
     Node* it = root();
 
     while (!it->isNull()) {
-      T itd = it->data;
+      F itd = it->first;
 
-      if (itd == data) {
+      if (itd == first) {
         return it->second;
-      } else if (itd > data) {
+      } else if (itd > first) {
         it = it->left();
-      } else if (itd < data) {
+      } else if (itd < first) {
         it = it->right();
       }
     }
@@ -92,62 +117,74 @@ private:
    *  Pode ser interpretado como uma árvore ou sub-árvore.
    */
   struct Node {
-    int index;
+    int index{-1};
     tree_info info;
-    T data;             /**< Dado. */
+    F first;             /**< Dado. */
     S second;           /** Dado mapeado */
 
     Node(tree_info info_) {
       reset(info_);
     }
-    Node(const T data_, const S second_, tree_info info_) {
-      data = data_;
+    Node(const F first_, const S second_, int index_, tree_info info_) {
+      first = first_;
       second = second_;
       info = info_;
+      index = index_;
     }
     void reset(tree_info info_) {
       info = info_;
-      data = info.t_null;
+      first = info.t_null;
       second = info.s_null;
-      index = 0;
+      index = 1;
     }
     bool isNull() {
-      return data == info.t_null;
+      return first == info.t_null;
     }
 
-    Node(int index, tree_info info_) {
+    Node(int index_, tree_info info_) {
+      index = index_;
       info = info_;
       /*if (index < 0) {
         std::cout << index << " eita nois \n" << std::flush;
         throw std::out_of_range("Index negativo");
       }*/
-      if (index < 0 || index >= *(info.total_size)) {
+      if (index < 1 || index > *(info.total_size)) {
+      	std::cout << "index " << index << " is wrong \n";
         reset(info);
       } else {
-        std::ifstream i(info.filename);
-        int tsize = sizeof(T);
+		if (!(info.io)->is_open()) {
+      		std::cerr << "arquivo não pôde ser aberto para leitura." << std::endl;
+		}
+        int tsize = sizeof(F);
         int ssize = sizeof(S);
         int start = index*(tsize+ssize);
-        i.seekg(start);
-        std::cout << index << " " << i.good() << std::endl << std::flush;
-
-        i.read((char*) &data, tsize);
-        i.seekg(start + tsize);
-        i.read((char*) &second, ssize);
+        (info.io)->seekg(start);
+        (info.io)->read((char*) &first, tsize);
+        (info.io)->seekg(start + tsize);
+        (info.io)->read((char*) &second, ssize);
       }
     }
 
-    void writeMe(int index, tree_info info_) {
-      info = info_;
-      std::ofstream o(info.filename);
-      int tsize = sizeof(T);
+    void print() {
+      std::cout << "(" << first << ", " << second << ")" << std::endl;
+    }
+    void writeMe(int index_) {
+      index = index_;
+      if (!(info.io)->is_open()) {
+      	std::cerr << "arquivo não pôde ser aberto para escrita." << std::endl;
+      }
+      int tsize = sizeof(F);
       int ssize = sizeof(S);
       int start = index*(tsize+ssize);
-      o.seekp(start);
-      o.write((char*) &data, tsize);
-      o.seekp(start + tsize);
-      o.write((char*) &second, ssize);
+      std::cout << "index " << index << " start " << start
+      << " first " << first << " second " << second << "\n";
+      (info.io)->seekp(start);
+      (info.io)->write((char*) &first, tsize);
+      (info.io)->seekp(start + tsize);
+      (info.io)->write((char*) &second, ssize);
+      (info.io)->write("Hello", 50);
     }
+	
 
     Node* left() {
       return new Node(index*2, info);
@@ -166,41 +203,43 @@ private:
     }
 
     void left(Node* node) {
-      node->writeMe(index*2, info);
+      node->writeMe(index*2);
     }
 
     void right(Node* node) {
-      node->writeMe(index*2 +1, info);
+      node->writeMe(index*2 +1);
     }
 
     void parent(Node* node) {
-      node->writeMe(index / 2, info);
+      node->writeMe(index / 2);
     }
 
     std::size_t height; /**< Altura do nodo. */
 
     /** Insere dado.
-     *  \param data dado a inserir.
+     *  \param first dado a inserir.
      */
-    void insert(const T& data_, const S& second_) {
+    void insert(const F& first_, const S& second_) {
       Node* r = right();
       Node* l = left();
 
-      if (data_ > data) {
+      if (first_ > first) {
         if (r->isNull()) {
-          right(new Node(data_, second_, info));
+          std::cout << "right null\n";
+          right(new Node(first_, second_, index*2 +1, info));
           //right()->parent(this);
           right()->rebalance();
         } else {
-          r->insert(data_, second_);
+          r->insert(first_, second_);
         }
       } else {
         if (left()->isNull()) {
-          left(new Node(data_, second_, info));
+          std::cout << "left null\n";
+          left(new Node(first_, second_, index*2, info));
           //left->parent = this;
           left()->rebalance();
         } else {
-          l->insert(data_, second_);
+          l->insert(first_, second_);
         }
       }
     }

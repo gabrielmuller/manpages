@@ -1,0 +1,61 @@
+
+@deftypefun {bool} err_P ({int} @var{x})
+Return @var{x} if a valid error code (-1 @dots{} @var{MAXERR});
+else 0.
+@end deftypefun
+
+@deftypefun {bool} success_P ({int} @var{x})
+Not @code{err_P}.
+@end deftypefun
+
+@deftypevar {int} success
+Successful execution (0).
+@end deftypevar
+
+@noindent
+Negative integers are used for errors according to increasingly
+severity, as follows:
+
+@deftypevar {int} notpres
+Successful execution; no data present or no change made.
+@end deftypevar
+
+@deftypevar {int} terminated
+Failure; no damage; caller can retry operation.
+@end deftypevar
+
+@deftypevar {int} retryerr
+Failure; no damage; caller can retry operation.
+@end deftypevar
+
+@deftypevar {int} keyerr
+Failure, no damage, call was in error.
+@end deftypevar
+
+@deftypevar {int} argerr
+Failure, no damage, call was in error.
+@end deftypevar
+
+@deftypevar {int} noroom
+Failure, no damage, out of room in file.
+@end deftypevar
+
+@deftypevar {int} typerr
+Failure, file or object was not of correct type.
+@end deftypevar
+
+@deftypevar {int} ioerr
+I/O error, DB may be damaged.
+@end deftypevar
+
+@deftypevar {int} strangerr
+Internal error, DB may be damaged.
+@end deftypevar
+
+@deftypevar {int} unkerr
+Placeholder code.
+@end deftypevar
+
+@deftypevar {int} maxerr
+All error codes are between 0 and @samp{maxerr}.
+@end deftypevar

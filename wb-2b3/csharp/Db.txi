@@ -1,0 +1,184 @@
+
+
+All of the methods listed here which take byte-array arguments can
+also take string arguments, which get converted to UTF-8
+byte-arrays.
+
+@deftypefun {void} closeBt ({wb.Han} @var{han})
+
+Closes @var{han}
+@end deftypefun
+
+
+For @code{create-db} and @code{open-db}, the implicit @var{WCB}
+argument is the combination of @samp{WCB-SAP} and @samp{WCB-SAR}.
+
+@deftypefun {Han} createDb ({wb.Seg} @var{seg}, {int} @var{typ}, {byte} []@var{nameStr})
+
+Returns a B-tree whose name has been entered in the root directory
+if successful; otherwise null.
+
+@var{typ} should be either
+
+@itemize @bullet
+@item @code{'D'} (directory) or
+@item @code{'T'} (regular tree).
+@end itemize
+
+B-trees with @var{typ} @code{#\D} which are pointed to by special
+entries in the root block (1) protect all their special entries from
+garbage collection by the @code{wbcheck} program.  @code{'T'} is for
+regular (data) arrays.
+@end deftypefun
+
+@deftypefun {Han} openDb ({wb.Seg} @var{seg}, {byte} []@var{nameStr})
+
+Returns the B-tree whose name has been entered in the root directory;
+or null if not found.
+@end deftypefun
+
+@deftypefun {int} flushEnts ({int} @var{attempts}, {int} @var{k})
+
+@var{k} is the number of dirty block buffers to write to disk;
+@var{attempts} is the number of times to try.  Note that blocks in any
+segment may be written by @code{flush-ents}.  @code{flush-ents}
+returns the number of blocks written.
+@end deftypefun
+
+@section Record Operations
+
+@deftypefun {byte} []bt_Get ({wb.Han} @var{han}, {byte} []@var{key})
+
+@var{han} is a handle to an open bt.  @var{key} is a string less
+than 255.B in length.
+
+@code{bt:get} returns a string of the value associated with @var{key}
+in the bt which @var{han} is open to.  @code{bt:get} returns null if
+@var{key} is not associated in the bt.
+@end deftypefun
+
+@deftypefun {byte} []bt_Next ({wb.Han} @var{han}, {byte} []@var{key})
+
+@var{han} is a handle to an open bt.  @var{key} is a string less
+than 255.B in length.
+
+@code{bt:next} returns the next @var{key} in bt @var{han} or null if
+none.
+@end deftypefun
+
+@deftypefun {byte} []bt_Prev ({wb.Han} @var{han}, {byte} []@var{key})
+
+@var{han} is a handle to an open bt.  @var{key} is a string less
+than 255.B in length.
+
+@code{bt:prev} returns the previous @var{key} in bt @var{han} or null
+if none.
+@end deftypefun
+
+@deftypefun {void} bt_Put ({wb.Han} @var{han}, {byte} []@var{key}, {byte} []@var{valStr})
+
+@var{han} is a handle to an open, mutable bt.  @var{key} and
+@var{val} are strings less than 255.B in length.
+
+@code{bt:put!} associates @var{key} with @var{val} in the bt
+@var{han}.  A status code is returned.
+@end deftypefun
+
+@deftypefun {bool} bt_Del ({wb.Han} @var{han}, {byte} []@var{key})
+
+@var{han} is a handle to an open, mutable bt.  @var{key} is a
+string less than 255.B in length.
+
+@code{bt:rem!} removes @var{key} and it's associated value from bt
+@var{han}.
+@end deftypefun
+
+@section Mutual Exclusion
+
+These 2 calls can be used for locking and synchronizing processes.
+
+@deftypefun {bool} bt_Insert ({wb.Han} @var{han}, {byte} []@var{key}, {byte} []@var{valStr})
+
+Associates @var{key} with @var{val} in the bt @var{han} only if
+@var{key} was previously empty.  Returns true for success, false for
+failure.
+@end deftypefun
+
+@deftypefun {byte} []bt_Rem ({wb.Han} @var{han}, {byte} []@var{key})
+
+Removes @var{key} and it's associated value from bt @var{han} only
+if @var{key} is present.  Returns @var{key}'s value for success, null
+for failure (not present).
+@end deftypefun
+
+@section Multiple Operations
+
+@deftypefun {int} bt_Delete ({wb.Han} @var{han}, {byte} []@var{key}, {byte} []@var{key2})
+
+Removes @var{key}s (and their associated values) between (including)
+@var{key1} and (not including) @var{key2} from bt @var{han}.  A
+status code is returned.
+@end deftypefun
+
+@deftypefun {byte} []bt_Scan ({wb.Han} @var{bthan}, {int} @var{op}, {byte} []@var{kstr1}, {byte} []@var{kstr2}, string @var{func}, {int} @var{blklimit})
+
+@code{btScan} scans all keys in the range [@var{kstr1}..@var{kstr2}),
+performing one of several functions:
+
+@multitable @columnfractions .2 .15 .66
+@item @var{operation}
+@tab @var{func}
+@tab RESULT
+@item COUNT-SCAN
+@tab NIL
+@tab counts all keys in range
+@item COUNT-SCAN
+@tab given
+@tab counts all keys in range satisfying @var{func}
+@item REM-SCAN
+@tab NIL
+@tab deletes all keys in range
+@item REM-SCAN
+@tab given
+@tab deletes all keys in range satisfying @var{func}
+@item MODIFY-SCAN
+@tab NIL
+@tab ARGERR
+@item MODIFY-SCAN
+@tab given
+@tab updates values for keys in range satisfying @var{func}
+@end multitable
+
+@code{btScan} returns null if there was an error; an empty byte-vector
+if scan completed; or the next key to be scanned if @var{blklimit} was
+not @samp{-1}.
+
+Each block of data is scanned/deleted/modified in a single operation
+that is, the block is found and locked only once, and only written after
+all modifications are made. Tho only exception is that MODIFY-SCANs
+that increase the size of values  can cause block splits. Such cases
+are detected and converted to a PUT plus a NEXT. This has
+two consequences: data is written out each time a PUT occurs,
+and it is conceivable that @var{func} may be called more than once on the
+key value that caused the split if a RETRYERR occurs in the PUT.
+However, SCAN guarantees that only one modification will actually be
+made in this case (so that one can write INCREMENT-RANGE, for example).
+
+@var{func} is passed pointers to (copies of) the key and value,
+plus one user argument:
+@example
+@var{func} (keystr, klen, vstr, vlen, extra_arg);
+@end example
+@var{func} is expected to return either: SUCCESS for DELETE/COUNT,
+NOTPRES/NOTDONE for SKIP (ie, DONT DELETE/COUNT), or any other code to
+terminate the scan resumably at the current point.  For MODIFY-SCAN,
+if changing the value, the new value length is returned.  Except for
+the case mentioned above, the caller can depend on @var{func} being
+called exactly once for each key value in the specified range, and
+only on those values.
+
+If @var{kstr2} <= @var{kstr1}, then no scan will occur (even if
+@var{kstr1} is found).  To make possible bounded-time operation
+@code{btScan} will access at most @var{blkLimit} blocks at a time; if
+you dont care, give it -1 for @var{blkLimit}.
+@end deftypefun

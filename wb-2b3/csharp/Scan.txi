@@ -1,0 +1,85 @@
+
+@deftypefun {int} btScan ({wb.Han} @var{han}, {int} @var{operation}, {byte} []@var{kstr1}, {int} @var{len1}, {byte} []@var{kstr2}, {int} @var{len2}, string @var{func}, {int} []@var{longTab}, {int} []@var{respkt}, {int} @var{blkLimit})
+@code{btScan} scans all keys in the range [@var{kstr1}..@var{kstr2}),
+performing one of several functions:
+
+@multitable @columnfractions .2 .15 .66
+@item @var{operation}
+@tab @var{func}
+@tab RESULT
+@item COUNT-SCAN
+@tab NIL
+@tab counts all keys in range
+@item COUNT-SCAN
+@tab given
+@tab counts all keys in range satisfying @var{func}
+@item REM-SCAN
+@tab NIL
+@tab deletes all keys in range
+@item REM-SCAN
+@tab given
+@tab deletes all keys in range satisfying @var{func}
+@item MODIFY-SCAN
+@tab NIL
+@tab ARGERR
+@item MODIFY-SCAN
+@tab given
+@tab updates values for keys in range satisfying @var{func}
+@end multitable
+
+@code{btScan} returns SUCCESS if scan completed; under any other result code
+the scan is resumable. The possible results are:
+
+@table @asis
+@item NOTPRES
+meaning the @var{blkLimit} was exceeded;
+@item RETRYERR
+meaning @var{func} or delete got a RETRYERRR;
+@item TERMINATED
+meaning @var{func} asked to terminate the scan;
+@item <other error>
+means @var{func} or DELETE encountered this errror.
+@end table
+
+Each block of data is scanned/deleted/modified in a single operation
+that is, the block is found and locked only once, and only written after
+all modifications are made. Tho only exception is that MODIFY-SCANs
+that increase the size of values  can cause block splits. Such cases
+are detected and converted to a PUT plus a NEXT. This has
+two consequences: data is written out each time a PUT occurs,
+and it is conceivable that @var{func} may be called more than once on the
+key value that caused the split if a RETRYERR occurs in the PUT.
+However, SCAN guarantees that only one modification will actually be
+made in this case (so that one can write INCREMENT-RANGE, for example).
+
+@var{func} is passed pointers to (copies of) the key and value,
+plus one user argument:
+@example
+@var{func} (keystr klen vstr vlen extra_arg);
+@end example
+@var{func} is expected to return either: SUCCESS for DELETE/COUNT,
+NOTPRES/NOTDONE for SKIP (ie, DONT DELETE/COUNT), or
+any other code to terminate the scan resumably at the current point.
+For MODIFY-SCAN, if changing the value, the new value length is returned.
+Except for the case mentioned above, the caller can depend on @var{func}
+being called exactly once for each key value in the specified range,
+and only on those values.
+
+If @var{kstr2} <= @var{kstr1}, then no scan will occur (even if @var{kstr1} is found).
+To make possible bounded-time operation @code{btScan} will
+access at most @var{blkLimit} blocks at a time; if you dont care,
+give it -1 for @var{blkLimit}.
+
+The number of keys deleted/counted/modified is returned in the
+@code{skey-count} field of @var{respkt}; the key to resume at is returned in
+@var{kstr1} (@emph{which therefore needs to be 256 bytes long}); and the
+new key length is returned in the @code{skey-len} field of @var{respkt}. If
+returns SUCCESS, @code{skey-len} is zero.  NOTE that
+@code{skey-count} is cumulative, so the caller needs to initialize
+it to 0 when starting a new @code{btScan}.
+
+@emph{WARNING:} when @code{btScan} returns other than SUCCESS, it modifies
+the @var{kstr1} string so that the string args are correctly set up for the
+next call (the returned value is the new length for @var{kstr1}).
+Therefore, @emph{@var{kstr1} must be a maximum-length string!}
+@end deftypefun

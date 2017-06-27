@@ -1,0 +1,148 @@
+
+@deftypefun {int} initWb ({int} @var{maxNumEntsCnt}, {int} @var{maxNumBuks}, {int} @var{maxBlkSize})
+
+
+Initializes the WB system.  @code{initWb} should be called before any other WB
+functions.
+
+@table @var
+
+@item @var{maxBlkSize}
+The size of each disk cache buffer to be allocated from RAM.
+It should be an integer multiple of the file-system block size.
+The minimum is 1.5 kB.
+
+@item @var{maxNumEntsCnt}
+
+The number of (RAM) disk cache buffers to be allocated.
+This should be proportional to the size of the database working set.
+If too small, then the disk will be kept busy writing and reading
+pages which get flushed to read in other pages.
+The minimum is 12 times the number of threads.
+
+The product of @var{maxNumEntsCnt} and @var{maxBlkSize} should be less than the size of RAM on your
+computer.
+
+@item @var{maxNumBuks}
+
+The number of hash buckets for the (RAM) disk cache.  It should not
+be less than @var{maxNumEntsCnt}.
+The minimum is 2, maybe 3 (due to how get-free-ent works).
+@end table
+
+If not all @var{maxNumEntsCnt} can be allocated (by malloc) then WB can still run
+properly.
+The number of buffers actually allocated is returned if successful;
+a status code is returned otherwise.
+
+If the @var{bsiz} argument to @code{make-seg} is larger than the @var{maxBlkSize}
+which was passed to @code{initWb}, then the call to @code{make-seg} will fail.
+@end deftypefun
+
+@deftypefun {int} finalWb ()
+
+
+Frees all memory used by the WB system.  All segments will be closed.
+
+To preserve database consistency, it is important to call @code{finalWb} or
+@code{close-seg} before program termination if changes have been
+made to a segment.
+@end deftypefun
+
+@noindent
+The @var{bsiz} of a segment (given in call to @code{make_seg})
+is a parameter crucial for performance; balancing CPU time traversing
+blocks with file-system latency.  @var{bsiz} should be an
+integer multiple of the file-system block size.
+
+@noindent
+In the 1990s our nominal @var{bsiz} was 2.kiB; now it should
+probably be 4.kiB, 8.kiB, or 16.kiB.
+
+@deftypefun {wb.Seg} openSeg ({String} @var{filename}, {bool} @var{mutable_P})
+
+
+Opens the database file @var{filename} and returns a @dfn{seg}, false otherwise.
+@cindex seg
+The database will be read-only if the @var{mutable_P} argument is false.  It will
+be read-write if the @var{mutable_P} argument is true.
+@end deftypefun
+
+@deftypefun {wb.Seg} openSegd ({String} @var{filename}, {bool} @var{mutable_P}, {bool} @var{evenIfDirty_P})
+
+
+Opens the database file @var{filename} and returns a @dfn{seg}, false otherwise.
+@cindex seg
+The database will be read-only if the @var{mutable_P} argument is false.  It will
+be read-write if the @var{mutable_P} argument is true.  If the @var{evenIfDirty_P} argument is
+false, then @code{openSegd} will fail if the database file @var{filename} was not closed
+cleanly; otherwise it will open, clean or not.
+@end deftypefun
+
+@deftypefun {int} closeSeg ({wb.Seg} @var{seg}, {bool} @var{hammer_P})
+
+Closes database segment @var{seg} and the file containing it.  If @var{hammer_P} is
+NULL, then if there are any problems freeing buffers, then the close
+is aborted.  A status code is returned.
+@end deftypefun
+
+@deftypefun {wb.Seg} makeSeg ({String} @var{filename}, {int} @var{bsiz})
+
+
+The integer @var{bsiz} specifies the size of B-tree blocks.  @var{bsiz} should be an
+integer multiple of the file-system block size.  Nominal value is
+4096.
+
+@code{makeSeg} returns an open new empty mutable database named backed by file
+@var{filename} if successful; otherwise false is returned.
+@end deftypefun
+
+@cindex wcb
+@noindent The write-control-bits argument (@var{wcb}) to these
+functions controls the latency of updates to the file after various
+operations.  These bits are defined as follows:
+
+@multitable @columnfractions .1 .3 .6
+@item @var{value}
+@tab C-name
+@tab Meaning
+@item 1
+@tab wcb_sap
+@tab save block after PUTs
+@cindex wcb_sap
+@item 2
+@tab wcb_sar
+@tab save block after REMOVEs
+@cindex wcb_sar
+@item 4
+@tab wcb_sac
+@cindex wcb_sac
+@tab force block save after cached block changes
+@item 8
+@tab wcb_fac
+@tab flush buffer entirely after cached block changes (not currently
+implemented)
+@cindex wcb_fac
+@end multitable
+
+@deftypefun {int} btOpen ({wb.Seg} @var{seg}, {int} @var{blkNum}, {wb.Han} @var{han}, {int} @var{wcb})
+Opens bt-handle @var{han} to seg number @var{seg}, block number @var{blkNum}, and
+returns the type of the block.  If no such block exists or is not a
+root block, then a (negative) status code is returned.
+@end deftypefun
+
+@deftypefun {int} btCreate ({wb.Seg} @var{seg}, {int} @var{typ}, {wb.Han} @var{han}, {int} @var{wcb})
+Creates a new root block in seg @var{seg} of type @var{typ}, opens bt-handle
+@var{han} to it, and returns a status code.  If @var{seg} has insufficient room to
+create a new tree, then the @var{noroom} status code is returned.
+
+@code{btCreate} can be used to create temporary b-trees.  Temporary trees will be
+be reclaimed by check program after system crashes.  In order to
+make a tree persistent, add it to a directory (tree).
+@end deftypefun
+
+@deftypefun {int} btClose ({wb.Han} @var{han})
+Closes bt-handle @var{han} and returns @var{SUCCESS}.
+
+Currently, @code{btClose} has no effect other than to clear @var{han}.
+@end deftypefun

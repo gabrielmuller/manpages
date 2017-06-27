@@ -1,0 +1,74 @@
+
+@noindent
+Note: most of the data-manipulating commands here
+can return @var{notpres}, with the followng meanings:
+@cindex notpres
+
+@multitable @columnfractions .2 .8
+@item @code{bt-get}
+@tab @var{key} was not found.
+@item @code{bt-next}
+@tab no @emph{next} @var{key} (eg, given @var{key} was last key).
+@item @code{bt-prev}
+@tab no @emph{prev} @var{key} (eg, given @var{key} was first key).
+@item @code{bt-rem}
+@tab @var{key} was not found.
+@c @item @code{bt-rem-range}
+@c @tab ??
+@item @code{bt-put}
+@tab @emph{unused} (could be symmetric with write).
+@item @code{bt-write}
+@tab @var{key} @emph{was} found, so no write was done.
+@end multitable
+
+@deftypefun {int} bt_get ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{ans_str})
+@var{key_str} is a string of length @var{k_len}.  @code{bt_get} stores into the string @var{ans_str} the
+value associated with @var{key_str} in tree @var{han}.  @code{bt_get} returns the length of the
+string stored into @var{ans_str} or an error code.
+@end deftypefun
+
+@deftypefun {int} bt_next ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{ans_str})
+@var{key_str} is a string of length @var{k_len}.  @code{bt_next} stores into the string @var{ans_str} the
+next key after @var{key_str} in tree @var{han}.  @code{bt_next} returns the length of the string
+stored into @var{ans_str} or an error code.
+@end deftypefun
+
+@deftypefun {int} bt_prev ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{ans_str})
+@var{key_str} is a string of length @var{k_len}.  @code{bt_prev} stores into the string @var{ans_str} the
+last key before @var{key_str} in tree @var{han}.  @code{bt_prev} returns the length of the string
+stored into @var{ans_str} or an error code.
+@end deftypefun
+
+@deftypefun {int} bt_rem ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{ans_str})
+@var{key_str} is a string of length @var{k_len}.  @code{bt_rem} stores into the string @var{ans_str} the
+value associated with @var{key_str} in tree @var{han}; then removes that association
+from tree @var{han}.  @code{bt_rem} returns the length of the string stored into @var{ans_str} or
+an error code.
+
+If @var{ans_str} is 0, @code{bt_rem} removes the @var{key_str} association from tree @var{han} and returns
+@var{SUCCESS} if successful; an error code if not.
+@end deftypefun
+
+@deftypefun {int} bt_rem_range ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{key2_str}, {int} @var{k2_len})
+@var{key_str} must be a maximum-length (256 byte) string containing a key
+@var{k_len} bytes long.  @var{key2_str} is a string of length @var{k2_len}.
+
+@code{bt_rem_range} removes [@var{key_str} @dots{} @var{key2_str}) and their values.  If @var{key2_str} <= @var{key_str} no
+deletion will occur (even if @var{key_str} is found).  @code{bt_rem_range} returns SUCCESS if
+the operation is complete, an error status code if not.
+@end deftypefun
+
+@deftypefun {int} bt_put ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{val_str}, {int} @var{v_len})
+@var{key_str} is a string of length @var{k_len}.  @var{val_str} is a string of length @var{v_len}.  @code{bt_put}
+makes the value associated with @var{key_str} be @var{val_str} in tree @var{han}.  @code{bt_put} returns a
+status code for the operation.
+@end deftypefun
+
+@deftypefun {int} bt_write ({HAND *} @var{han}, {unsigned char *} @var{key_str}, {int} @var{k_len}, {unsigned char *} @var{val_str}, {int} @var{v_len})
+@var{key_str} is a string of length @var{k_len}.  @var{val_str} is a string of length @var{v_len}.  If
+@var{han} currently contains an association for @var{key_str}, then @code{bt_write} does not modify
+the tree and returns the @var{notpres} status code.
+
+Otherwise, @code{bt_write} makes the value associated with @var{key_str} be @var{val_str} in tree @var{han}.
+@code{bt_write} returns a status code for the operation.
+@end deftypefun

@@ -1,5 +1,5 @@
 ARGS=
-PARAMS=-std=c++14
+PARAMS=-std=c++14 -lwb
 INPUT=pages_little
 compilerun:
 	make -s compile

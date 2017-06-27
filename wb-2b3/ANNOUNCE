@@ -1,0 +1,102 @@
+This message announces the availability of wb-2b3.
+
+"WB" is a disk based (sorted) associative-array database package
+providing C, SCM, Java, and C# libraries.  These associative arrays
+consist of variable length (0.B to 255.B) keys and values.  Functions
+are provided to:
+
+   * create, destroy, open and close disk-files and associative arrays;
+
+   * insert, delete, retrieve, find next, and find previous (with
+     respect to dictionary order of keys); and
+
+   * apply functions, delete, or modify values over a range of
+     consecutive key values.
+
+WB is thread safe (so long as HAND structures are not shared between
+threads).  The `put' and `rem' operations allow associations to be
+used for thread mutexs.
+
+The WB implementation has a file size limit of 2^32 * block size
+(default 2048.B) = 2^43 bytes (8796.GB).  WB does its own memory and
+disk management and maintains a RAM cache of recently used blocks.
+Multiple associative arrays can reside in one disk file.  Simultaneous
+access to multiple disk files is supported.
+
+The (database) disk files interoperate between the various language
+platforms.  The interface to the SCM Scheme implementation supports
+longer data values and SLIB relational databases.
+
+A structure checking and garbage collecting program and a block viewer
+are provided.
+
+WB is lightweight; compiled on x86_64 GNU/Linux, the wb-2b3 library
+sizes are:
+
+  java/wb.jar	 51 kB	Java archive (zipped)
+  csharp/Wb.dll	 63 kB	PE for MS Windows (DLL) Mono/.Net assembly
+  c/libwb.so	 81 kB	ELF 64-bit LSB shared object, stripped
+  		 91 kB	ELF 64-bit LSB shared object, not stripped
+  c/libwb.a	131 kB	binary 64-bit library archive
+  c/wbscm.so	113 kB	ELF 64-bit LSB shared object DLL for SCM, not stripped
+
+WB is implemented using a variant of B-tree structure.  B-trees give
+slower access than hashing but are dynamic and provide an efficient
+determination of successor and predecessor keys.  All operations are
+O(log(n)) in the size of the database.  B-trees are commonly used by
+database systems for implementing index structures.  B-trees are
+optimized for using the minimum number of disk operations for large data
+structures.  Prefix and suffix key compression are used for storage
+efficiency in WB.
+
+WB is free software and part of the GNU project.  It is released under
+the GNU Lesser General Public License (LGPL).
+
+Documentation and distributions in several formats are linked from
+WB's home page:
+
+	       <http://people.csail.mit.edu/jaffer/WB>
+
+Links to distributions of WB and related softwares are at the end of
+this message.
+
+				-=-=-
+wb-2b3 news:
+
+wb-2b3 is a minor revision.  Details at
+<http://cvs.savannah.gnu.org/viewvc/*checkout*/wb/wb/ChangeLog>
+
+  * scm2c, scm2cs, scm2java: Minor translator corrections.
+  * scm2c, segs.scm (bytes-length): The only 2 translated calls are
+  in segs.scm.  Translate them to strlen().
+  * c/segs.c, segs.scm: db-version-str and db-authors-str are
+  strings, not bytes.
+  * c/Makefile: -lpthread must be after linked files.
+
+				-=-=-
+
+WB source is available from:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/wb-2b3.zip>
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/wb-2b3-1.src.rpm>
+Also available as a binary RPM:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/wb-2b3-1.x86_64.rpm>
+
+WB comes with an interface to the Scheme implementation SCM; and
+contains "wbtab.scm", SCM code allowing WB to implement SLIB
+relational databases.
+
+SCM source is available from:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2.zip>
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2-1.src.rpm>
+Also available as a binary RPMs:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2-1.x86_64.rpm>
+The i386 MS-Windows installer for SCM includes the WB Scheme API:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/scm-5f2-1.exe>
+
+SLIB is a portable Scheme library which SCM uses:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b5.zip>
+Also available as RPM:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b5-1.src.rpm>
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b5-1.noarch.rpm>
+Also available as MS-Windows installer:
+ <http://groups.csail.mit.edu/mac/ftpdir/scm/slib-3b5-1.exe>

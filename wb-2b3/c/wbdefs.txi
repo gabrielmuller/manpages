@@ -1,0 +1,61 @@
+
+@deffn {C Preprocessor Macro} err_P (@var{x})
+Return @var{x} if a valid error code (-1 @dots{} @var{MAXERR});
+else 0.
+@end deffn
+
+@deffn {C Preprocessor Macro} success_P (@var{x})
+Not @code{err_P}.
+@end deffn
+
+@defvr {C Preprocessor Constant} success 
+Successful execution (0).
+@end defvr
+
+@noindent
+Negative integers are used for errors according to increasingly
+severity, as follows:
+
+@defvr {C Preprocessor Constant} notpres 
+Successful execution; no data present or no change made.
+@end defvr
+
+@defvr {C Preprocessor Constant} terminated 
+Failure; no damage; caller can retry operation.
+@end defvr
+
+@defvr {C Preprocessor Constant} retryerr 
+Failure; no damage; caller can retry operation.
+@end defvr
+
+@defvr {C Preprocessor Constant} keyerr 
+Failure, no damage, call was in error.
+@end defvr
+
+@defvr {C Preprocessor Constant} argerr 
+Failure, no damage, call was in error.
+@end defvr
+
+@defvr {C Preprocessor Constant} noroom 
+Failure, no damage, out of room in file.
+@end defvr
+
+@defvr {C Preprocessor Constant} typerr 
+Failure, file or object was not of correct type.
+@end defvr
+
+@defvr {C Preprocessor Constant} ioerr 
+I/O error, DB may be damaged.
+@end defvr
+
+@defvr {C Preprocessor Constant} strangerr 
+Internal error, DB may be damaged.
+@end defvr
+
+@defvr {C Preprocessor Constant} unkerr 
+Placeholder code.
+@end defvr
+
+@defvr {C Preprocessor Constant} maxerr 
+All error codes are between 0 and @samp{maxerr}.
+@end defvr

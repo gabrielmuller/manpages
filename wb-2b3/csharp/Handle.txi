@@ -1,0 +1,74 @@
+
+@noindent
+Note: most of the data-manipulating commands here
+can return @var{notpres}, with the followng meanings:
+@cindex notpres
+
+@multitable @columnfractions .2 .8
+@item @code{bt-get}
+@tab @var{key} was not found.
+@item @code{bt-next}
+@tab no @emph{next} @var{key} (eg, given @var{key} was last key).
+@item @code{bt-prev}
+@tab no @emph{prev} @var{key} (eg, given @var{key} was first key).
+@item @code{bt-rem}
+@tab @var{key} was not found.
+@c @item @code{bt-rem-range}
+@c @tab ??
+@item @code{bt-put}
+@tab @emph{unused} (could be symmetric with write).
+@item @code{bt-write}
+@tab @var{key} @emph{was} found, so no write was done.
+@end multitable
+
+@deftypefun {int} btGet ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{ansStr})
+@var{keyStr} is a string of length @var{kLen}.  @code{btGet} stores into the string @var{ansStr} the
+value associated with @var{keyStr} in tree @var{han}.  @code{btGet} returns the length of the
+string stored into @var{ansStr} or an error code.
+@end deftypefun
+
+@deftypefun {int} btNext ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{ansStr})
+@var{keyStr} is a string of length @var{kLen}.  @code{btNext} stores into the string @var{ansStr} the
+next key after @var{keyStr} in tree @var{han}.  @code{btNext} returns the length of the string
+stored into @var{ansStr} or an error code.
+@end deftypefun
+
+@deftypefun {int} btPrev ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{ansStr})
+@var{keyStr} is a string of length @var{kLen}.  @code{btPrev} stores into the string @var{ansStr} the
+last key before @var{keyStr} in tree @var{han}.  @code{btPrev} returns the length of the string
+stored into @var{ansStr} or an error code.
+@end deftypefun
+
+@deftypefun {int} btRem ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{ansStr})
+@var{keyStr} is a string of length @var{kLen}.  @code{btRem} stores into the string @var{ansStr} the
+value associated with @var{keyStr} in tree @var{han}; then removes that association
+from tree @var{han}.  @code{btRem} returns the length of the string stored into @var{ansStr} or
+an error code.
+
+If @var{ansStr} is 0, @code{btRem} removes the @var{keyStr} association from tree @var{han} and returns
+@var{SUCCESS} if successful; an error code if not.
+@end deftypefun
+
+@deftypefun {int} btRemRange ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{key2Str}, {int} @var{k2Len})
+@var{keyStr} must be a maximum-length (256 byte) string containing a key
+@var{kLen} bytes long.  @var{key2Str} is a string of length @var{k2Len}.
+
+@code{btRemRange} removes [@var{keyStr} @dots{} @var{key2Str}) and their values.  If @var{key2Str} <= @var{keyStr} no
+deletion will occur (even if @var{keyStr} is found).  @code{btRemRange} returns SUCCESS if
+the operation is complete, an error status code if not.
+@end deftypefun
+
+@deftypefun {int} btPut ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{valStr}, {int} @var{vLen})
+@var{keyStr} is a string of length @var{kLen}.  @var{valStr} is a string of length @var{vLen}.  @code{btPut}
+makes the value associated with @var{keyStr} be @var{valStr} in tree @var{han}.  @code{btPut} returns a
+status code for the operation.
+@end deftypefun
+
+@deftypefun {int} btWrite ({wb.Han} @var{han}, {byte} []@var{keyStr}, {int} @var{kLen}, {byte} []@var{valStr}, {int} @var{vLen})
+@var{keyStr} is a string of length @var{kLen}.  @var{valStr} is a string of length @var{vLen}.  If
+@var{han} currently contains an association for @var{keyStr}, then @code{btWrite} does not modify
+the tree and returns the @var{notpres} status code.
+
+Otherwise, @code{btWrite} makes the value associated with @var{keyStr} be @var{valStr} in tree @var{han}.
+@code{btWrite} returns a status code for the operation.
+@end deftypefun

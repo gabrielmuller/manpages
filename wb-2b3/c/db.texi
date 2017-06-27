@@ -1,0 +1,42 @@
+
+@deftypefun {void} close_bt ({HAND *} @var{han})
+
+Closes and frees @var{han}; the b-tree associated with @var{han}
+remains in the segment.
+@end deftypefun
+
+
+For @code{create-db} and @code{open-db}, the implicit @var{WCB}
+argument is the combination of @samp{WCB-SAP} and @samp{WCB-SAR}.
+
+@deftypefun {HAND *} create_db ({SEGD *} @var{seg}, {int} @var{typ}, {unsigned char *} @var{name_str})
+
+Returns a B-tree whose name has been entered in the root directory
+if successful; otherwise null.
+
+@var{typ} should be either
+
+@itemize @bullet
+@item @code{'D'} (directory) or
+@item @code{'T'} (regular tree).
+@end itemize
+
+B-trees with @var{typ} @code{#\D} which are pointed to by special
+entries in the root block (1) protect all their special entries from
+garbage collection by the @code{wbcheck} program.  @code{'T'} is for
+regular (data) arrays.
+@end deftypefun
+
+@deftypefun {HAND *} open_db ({SEGD *} @var{seg}, {unsigned char *} @var{name_str})
+
+Returns the B-tree whose name has been entered in the root directory;
+or null if not found.
+@end deftypefun
+
+@deftypefun {int} flush_ents ({int} @var{attempts}, {int} @var{k})
+
+@var{k} is the number of dirty block buffers to write to disk;
+@var{attempts} is the number of times to try.  Note that blocks in any
+segment may be written by @code{flush-ents}.  @code{flush-ents}
+returns the number of blocks written.
+@end deftypefun
